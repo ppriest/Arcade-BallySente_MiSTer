@@ -1,0 +1,4 @@
+QUARTUS_VERSION = "17.0"
+# BallySente_stp is the instrumented revision (ISSP probes, OSD debug page); BallySente the release.
+PROJECT_REVISION = "BallySente_stp"
+PROJECT_REVISION = "BallySente"
