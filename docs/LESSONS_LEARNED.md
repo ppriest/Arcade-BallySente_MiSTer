@@ -1132,6 +1132,45 @@ ack address that is also an input port must acknowledge on writes only.
 
 ## Driving MAME as a reference generator (Lua)
 
+- **[BallySente] A changed index is not a changed pixel.** A scout counting writes that land
+  after the beam has passed the pixels they feed reported 22.4% of `cshift` play frames as
+  differing from MAME, and the busiest of them -- 1,089 late writes touching 2,202 pixels --
+  rendered IDENTICALLY. Every one of those indices mapped to the same RGB in the active palette
+  bank. A byte-level metric over indexed colour is an upper bound on divergence, never a count of
+  wrong pixels, and quoting it as one would have justified a much more complicated core. Find
+  candidate frames cheaply with the byte metric, then RENDER them and count pixels. The same
+  applies to any indexed-colour hardware: two indices can be the same colour, and games use that.
+- **[BallySente] When a cheap metric and an expensive render disagree, the render is right.**
+  The sequence that found the above: a scout said a frame had 1,089 late writes, the rendered
+  frame showed zero differing pixels, and the instinct was that the renderer was broken. It was
+  not. Three checks settled it without guessing -- replaying the write log onto the frame-start
+  RAM reproduced the end-of-frame RAM byte for byte, rendering with the writes removed changed
+  nothing, and comparing the two indices through the palette showed 2,202 of 2,202 landing on the
+  same colour. Build the cheap metric to FIND frames, never to conclude from.
+- **[BallySente] A MAME screenshot is the screen PLUS whatever MAME drew over it.** A reference
+  frame for `stocker` came back with a 13x32 crosshair blended into the corner, because the game
+  has an analog wheel and MAME renders a crosshair for any port with a crosshair axis. It cost a
+  pixel comparison 416 pixels that the hardware never draws, and the per-system `cfg` that is
+  supposed to turn it off did not. The cheap, general defence is a property of the hardware: this
+  board has 4 bits per channel expanded as `(v << 4) | v`, so every pixel it can produce is a
+  multiple of 17 in all three channels, and anything else provably did not come from the game.
+  `render_model.py` excludes those pixels and prints how many and where, so an overlay is
+  reported rather than either silently failing the diff or being quietly masked. Any core whose
+  palette is narrower than 8 bits per channel can do the same.
+- **[BallySente] MAME has two references per frame and they are not the same picture.**
+  `screen:pixels()` returns the screen's own bitmap and `screen:snapshot()` the composited
+  render. The bitmap is rendered when the driver says (`VIDEO_UPDATE_BEFORE_VBLANK` here, at
+  vblank start) while a capture's RAM dump happens at the frame notifier, so the bitmap LAGS the
+  RAM by whatever the CPU wrote in between -- measured at 15 pixels on one frame and 231 on
+  another. The snapshot matched the RAM dump exactly on every capture. Take both, diff against
+  the one that matches the dump, and print the gap between them so the staleness stays visible.
+- **[BallySente] A capture is only evidence for the paths it ran.** The first video capture of
+  this core was pixel-exact and proved nothing about sprites: all 40 entries pointed at image 0,
+  which is blank, so the sprite path executed and drew no pixels. Attract mode does this in every
+  game here. Make the model PRINT what each frame exercised -- sprites drawn, flips, wrapping,
+  clipping, distinct images, palette banks -- and make the summary name what nothing has covered
+  yet. Then find the frames that fill the gaps with a scout pass over the game's own sprite list
+  (`scripts/sprite_scout.py`), one emulator run per game, instead of capturing frames at random.
 - **[BallySente] `device_state_entry` has no `name` in the Lua binding -- it is `symbol`.** A
   dumper that walked `cpu.state` writing `e.name` produced a manifest with RAM, timestamps and
   zero registers, and raised nothing: Lua returns nil for an absent property, the `if e.name`

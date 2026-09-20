@@ -239,13 +239,73 @@ Pixels are clipped to x in 0..255 and skipped for y < 16 + VBEND.
 the bank must be sampled per scanline, not per frame. Same for Shrike Avenger's sprite-bank
 select.
 
-### Raster timing
+MAME's boundary is 16 lines below the write, because `vpos()` is already absolute and the
+driver adds `VBEND` to it a second time. Measured, not inferred: `cshift` frame 2285 writes
+the bank at raster line 61 and MAME changes it at visible row 61 (absolute 77), and forcing
+the model to any other row costs 195 pixels or more. `docs/MAME_KLUDGES.md` has the entry;
+the core follows MAME.
 
-Sprite RAM, video RAM and the palette are all plain CPU RAM written by a 1.25 MHz CPU while
-the beam is live, and MAME issues partial updates on palette- and sprite-bank changes only.
-Run the video write sweep (`references/video_write_sweep.md`) before deciding what, if
-anything, is latched — the likely answer is "nothing is latched, the hardware is a
-scanout-time overlay", but that has to be measured rather than assumed.
+### Raster timing: the board races the beam
+
+Sprite RAM, video RAM and the palette are all plain CPU RAM written by a 1.25 MHz CPU while the
+beam is live. **Measured, not assumed** (`scripts/write_timing.py`, 900 frames each, writes
+counted by scanline from vblank start):
+
+| set | state | sprite RAM writes/frame | in vblank | video RAM writes/frame | in vblank |
+|---|---|---|---|---|---|
+| `cshift` | play | 84.0 | 0.0% | 42.2 | 0.0% |
+| `cshift` | attract | 0.4 | 0.0% | 110.5 | 0.2% |
+| `rescraid` | play | 120.8 | 2.1% | 42.9 | 0.8% |
+| `hattrick` | play | 1697.6 | 0.6% | 21.5 | 1.8% |
+
+**There is no safe window.** Every set writes both regions during active display, and none
+concentrates its writes in vblank -- `hattrick` writes the sprite list 1,698 times a frame,
+spread evenly across all 264 lines. So nothing can be latched or snapshotted at vblank without
+showing something the board never showed.
+
+The core therefore **scans out line by line from the live RAM**, like the board: the background
+is read as the line is drawn, the sprite engine builds the next line into a line buffer, and the
+palette bank is sampled per line. Nothing is buffered a frame ahead.
+
+**MAME does not do this**, and that is worth being clear about rather than discovering later.
+`screen_update_balsente` renders the WHOLE frame at vblank start from the RAM as it stands then
+(`VIDEO_UPDATE_BEFORE_VBLANK`), and `update_partial()` is called only from `palette_select_w` and
+Shrike's sprite-bank select -- never for a sprite-RAM or video-RAM write. So MAME shows the
+end-of-frame state uniformly down the screen, where the board shows line 100 as RAM stood at line
+100. On moving content the two cannot agree, and the board is right.
+
+The consequence for verification: `scripts/render_model.py` validated against MAME's frames
+checks the RENDERING FUNCTION -- palette decode, sprite composition, flips, wrapping, clipping --
+because it is fed the same snapshot MAME rendered from. It does not check timing.
+
+**Timing is checked against `render_model.py`'s beam mode**, which starts from the RAM as it
+stood at the first line of the frame and applies every write as the beam reaches it
+(`mame_capture.py --beam`). Two things make it trustworthy: replaying its write log onto the
+start RAM reproduces the end-of-frame RAM byte for byte, and on frames with no visible late
+write it agrees with MAME exactly.
+
+**How far apart are they?** Measured on rendered frames, not estimated:
+
+| frame | beam vs MAME |
+|---|---|
+| `cshift` 3000, 1200, 3523 | identical |
+| `hattrick` 3028 | identical |
+| `rescraid` 3062 | **218 pixels, 0.35%, rows 64-107** |
+
+So the divergence is real but small and occasional. `scripts/beam_scout.py` counts candidate
+frames across a whole run -- 22.4% of `cshift` play frames, every frame of `hattrick` and
+`rescraid` -- but that is an UPPER BOUND on bytes, not a count of wrong pixels. `cshift` frame
+3523 has 1,089 late writes touching 2,202 pixels and renders identically, because every one of
+those indices maps to the same RGB in the active bank. Find candidates with the scout, then
+render them to see what actually differs.
+
+### A sprite line buffer holds the NIBBLE, not the composed index
+
+Each sprite reads its low nibble from the BACKGROUND, not from an earlier sprite's result
+(`balsente_v.cpp`: `old` points into `m_expanded_videoram`). Overlapping sprite pixels are
+common -- 27 to 110 per frame across the captures in `debug/`, up to two deep -- so a line buffer
+storing the composed 8-bit palette index would give the second sprite the first one's low nibble.
+Store the 4-bit sprite nibble and a written flag; concatenate with the framebuffer at scanout.
 
 ## Sound: the 6VB board
 

@@ -7,11 +7,16 @@
 // and ROM checksum before reaching the self-calibration it exists to test.
 //
 // The image holds RAM, the CPU's registers, and every I/O write that preceded
-// it. There is no way to write a vendored CPU core's registers from outside --
-// T80 has no state port and rtl/cpu/t80/PROVENANCE.md says to keep it pristine
-// -- so the registers go in the only way the CPU itself provides: si_z80_stub()
-// returns a short straight-line program that loads them and jumps to PC, which
-// the bench serves in place of ROM for its first few dozen fetches.
+// it. The registers go in through a short straight-line program: si_z80_stub()
+// returns one that loads them and jumps to PC, which the bench serves in place
+// of ROM for its first few dozen fetches.
+//
+// THERE IS A BETTER WAY, not taken yet. `T80.vhd:124-127` exposes the whole
+// architectural state as `REG` out and `DIR`/`DIRSet` in, 212 bits; of the
+// vendored wrappers only `T80pa` forwards them, and this core instantiates
+// `T80se`, which does not. A thin local top level instantiating `T80` directly
+// would expose them without touching a vendored file, and would avoid every
+// cost listed below. See docs/STATE.md.
 //
 // WHAT THE STUB COSTS, all of it unavoidable and none of it load-bearing here:
 //

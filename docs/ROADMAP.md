@@ -357,9 +357,27 @@ Exit criteria:
 
 Build the MAME capture pipeline first (`mame_capture.py` + a `render_model.py` reproducing
 `balsente_v.cpp`), get it pixel-exact on captured frames, then check RTL against the model.
-Run the video write sweep (`references/video_write_sweep.md`) before committing to any buffering.
-Exit criteria: `sentetst` and `cshift` render frames pixel-identical to MAME's for a captured set
-of scenes, including a scene with a mid-frame palette-bank change, silent, in simulation.
+The video write sweep is **done** and it decides the architecture: the core races the beam.
+`scripts/write_timing.py` over 900 frames of four runs shows every set writing sprite RAM and
+video RAM during active display, with no concentration in vblank -- `hattrick` writes the sprite
+list 1,698 times a frame across all 264 lines. There is no safe point to latch or snapshot at, so
+nothing is buffered a frame ahead: the background is read as the line is drawn, the sprite engine
+fills the next line into a line buffer, and the palette bank is sampled per line
+(`docs/HARDWARE_NOTES.md`, "Raster timing: the board races the beam").
+
+**MAME cannot be the pixel reference for timing**, only for the rendering function. It renders the
+whole frame at vblank start from the RAM as it stands then, and calls `update_partial()` only for
+the palette bank -- never for a sprite-RAM or video-RAM write. On moving content MAME shows the
+end-of-frame state uniformly down the screen where the board shows line 100 as RAM stood at line
+100. Exit criteria, amended accordingly:
+
+1. `scripts/render_model.py` renders MAME's own captured frames pixel-identically, over a set of
+   scenes that between them exercise sprites, both flips, wrapping, edge clipping and a mid-frame
+   palette-bank change. **Met**: 9 captures across 6 games, 0 pixels differing.
+2. The RTL matches a scanline-accurate model, built from a write log with raster positions, on the
+   same scenes -- silent, in simulation.
+3. Where the RTL and MAME differ, every difference is attributable to a write during active
+   display, and that is written into `docs/MAME_KLUDGES.md` rather than tuned away.
 
 **Phase 2 — Hardware bring-up and the first games.**
 

@@ -101,6 +101,32 @@ def mame_cmd(exe, game, lua, mame_dir, extra=()):
             "-rompath", rompath(mame_dir), *extra]
 
 
+# MAME blends a crosshair over the screen for any port with a crosshair axis,
+# and screen:snapshot() captures that composite -- stocker has an analog wheel,
+# so a reference frame came back with a 13x32 crosshair in the corner and a
+# pixel comparison failed on 416 pixels the hardware never draws. There is no
+# command-line switch for it; visibility lives in the per-system cfg file, so
+# the capture writes one into a scratch cfg directory. Mode 0 is
+# CROSSHAIR_VISIBILITY_OFF (src/emu/crsshair.h).
+CROSSHAIR_OFF_CFG = """<?xml version="1.0"?>
+<mameconfig version="10">
+    <system name="{sys}">
+        <crosshairs>
+{players}
+        </crosshairs>
+    </system>
+</mameconfig>
+"""
+
+
+def write_crosshair_off(cfg_dir, system):
+    players = "\n".join(f'            <crosshair player="{i}" mode="0" />'
+                         for i in range(8))
+    Path(cfg_dir).mkdir(parents=True, exist_ok=True)
+    (Path(cfg_dir) / f"{system}.cfg").write_text(
+        CROSSHAIR_OFF_CFG.format(sys=system, players=players), encoding="ascii")
+
+
 def rompath(mame_dir):
     """roms/ in the repo, MAME's own roms/, then MAME_ROMPATH (mister.env or environment)."""
     extra = os.environ.get("MAME_ROMPATH", load_env().get("MAME_ROMPATH", ""))
@@ -117,6 +143,12 @@ def main():
     ap.add_argument("--out", default=None)
     ap.add_argument("--keep-going", action="store_true",
                     help="do not delete a previous capture of the same name")
+    ap.add_argument("--beam", action="store_true",
+                    help="also record the RAM at the start of the frame and every write "
+                         "during it with its raster line, for a scanline-accurate reference")
+    ap.add_argument("--coin", type=int, default=0,
+                    help="frame at which to insert a coin; Start follows 90 frames later. "
+                         "0 captures attract mode.")
     a = ap.parse_args()
 
     mame_dir, exe = mame_paths()
@@ -127,10 +159,19 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     seconds = a.seconds if a.seconds is not None else max(10, a.frame // 60 + 10)
 
-    cmd = mame_cmd(exe, a.set, "capture.lua", mame_dir, ["-seconds_to_run", str(seconds)])
+    cfg_dir = out / "cfg"
+    write_crosshair_off(cfg_dir, a.set)
+    cmd = mame_cmd(exe, a.set, "capture.lua", mame_dir,
+                   ["-seconds_to_run", str(seconds),
+                    "-cfg_directory", str(cfg_dir)])
     env = dict(os.environ, **lua_env(r), **lua_runner_env("capture.lua"),
                CORE_OUT=out.as_posix(), CORE_FRAME=str(a.frame),
-               CORE_READ=spec(r.get("read", {})), CORE_WTAP=spec(r.get("wtap", {})))
+               CORE_READ=spec(r.get("read", {})), CORE_WTAP=spec(r.get("wtap", {})),
+               CORE_SCANREG=spec(r.get("scanreg", {})),
+               CORE_BEAM=spec(r.get("beam", {})) if a.beam else "",
+               CORE_COIN=str(a.coin),
+               CORE_IN_COIN=r.get("inputs", {}).get("coin", "Coin 1"),
+               CORE_IN_START=r.get("inputs", {}).get("start", "1 Player Start"))
     print(f"{a.set} frame {a.frame} -> {out}")
     p = subprocess.run(cmd, cwd=mame_dir, env=env, capture_output=True, text=True, **NO_WINDOW)
     blob = p.stdout + p.stderr

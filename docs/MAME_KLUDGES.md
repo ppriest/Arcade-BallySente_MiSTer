@@ -19,6 +19,12 @@ Every in-scope set is `MACHINE_SUPPORTS_SAVE` with no accuracy flag; the driver'
 bugs" list is the accuracy statement instead (CEM3394 emulation imperfect, Shrike Avenger not
 working, two Maibesa sets on unemulated hardware).
 
+## Video
+
+| Kludge | MAME | Core | Would settle it |
+|---|---|---|---|
+| A mid-frame palette-bank switch lands 16 lines too low | `balsente_v.cpp` `palette_select_w()` calls `m_screen->update_partial(m_screen->vpos() - 1 + BALSENTE_VBEND)`. `screen_device::vpos()` already returns an ABSOLUTE raster line — `(m_visarea.max_y + 1 + delta / m_scantime) % m_height` — so adding `BALSENTE_VBEND` again moves the boundary 16 lines down the screen. Measured on `cshift` frame 2285: the write happens at raster line 61, which is visible row 45, and MAME changes the bank at visible row **61**; forcing the model to any other row costs 195 pixels or more, and to row 45 costs 3,346. | copies | A photograph or a capture of the real board on a frame that switches. The hardware has no reason to delay — the bank feeds the palette lookup directly, so it should change within a line of the write. |
+
 ## Sound
 
 | Kludge | MAME | Core | Would settle it |

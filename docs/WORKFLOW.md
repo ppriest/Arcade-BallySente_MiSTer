@@ -422,6 +422,7 @@ each **done** as it lands.
 | `build_rom_image.py`, `build_region.py` | the ROM image the benches load | GX, Seta |
 | `cfg.py` | read-modify-write of the per-core `.CFG` status word | Seta, Fuuki |
 | `read_issp.tcl`, `read_issp.py`, `probe.py` | read the probe / write the source bus over JTAG | skill |
+| `hwlock.py` | JTAG has priority: a waiting session publishes a reservation and no build or simulation may start while one stands. `--status` prints the holder, the queue and what is compiling | skill |
 | `report_worst_paths.tcl`, `sta_*.tcl` | worst setup paths from the compiled database | skill |
 | `mame_capture.py` + `mame/*.lua`, `write_timing.py` | headless MAME reference capture; video-write sweep | skill |
 | `render_model.py` | the software model of the driver's video file | GX, MS32 (pattern only) |

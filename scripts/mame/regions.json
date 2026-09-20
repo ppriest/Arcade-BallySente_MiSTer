@@ -5,29 +5,97 @@
   "bus_bytes": 1,
   "big_endian": true,
   "read": {
-    "spriteram": ["0x0000", "0x00ff"],
-    "workram":   ["0x0100", "0x07ff"],
-    "videoram":  ["0x0800", "0x7fff"],
-    "paletteram": ["0x8000", "0x8fff"]
+    "spriteram": [
+      "0x0000",
+      "0x00ff"
+    ],
+    "workram": [
+      "0x0100",
+      "0x07ff"
+    ],
+    "videoram": [
+      "0x0800",
+      "0x7fff"
+    ],
+    "paletteram": [
+      "0x8000",
+      "0x8fff"
+    ]
   },
   "wtap": {
-    "outlatch":   ["0x9800", "0x987f"],
-    "rombank":    ["0x98a0", "0x98bf"],
-    "palbank":    ["0x98c0", "0x98df"],
-    "rombank2":   ["0x9f00", "0x9f00"]
+    "outlatch": [
+      "0x9800",
+      "0x987f"
+    ],
+    "rombank": [
+      "0x98a0",
+      "0x98bf"
+    ],
+    "palbank": [
+      "0x98c0",
+      "0x98df"
+    ],
+    "rombank2": [
+      "0x9f00",
+      "0x9f00"
+    ]
   },
-  "sweep": ["spriteram", "videoram", "paletteram", "palbank", "rombank"],
+  "_scanreg": "registers whose value must be known PER SCANLINE, not per frame: palette_select_w calls update_partial(), so a frame can be drawn with more than one bank",
+  "scanreg": {
+    "palbank": [
+      "0x98c0",
+      "0x98df"
+    ]
+  },
+  "_beam": "regions to record for ONE frame with the raster line of every write: the board races the beam, so a single snapshot cannot say what each scanline saw",
+  "beam": {
+    "spriteram": [
+      "0x0000",
+      "0x00ff"
+    ],
+    "videoram": [
+      "0x0800",
+      "0x7fff"
+    ],
+    "paletteram": [
+      "0x8000",
+      "0x8fff"
+    ]
+  },
+  "sweep": [
+    "spriteram",
+    "videoram",
+    "paletteram",
+    "palbank",
+    "rombank"
+  ],
   "trace": {
     "addr_hi": "0xffff",
-    "io": ["0x9000", "0x9fff"],
-    "vectors": ["0xfff0", "0xffff"],
+    "io": [
+      "0x9000",
+      "0x9fff"
+    ],
+    "vectors": [
+      "0xfff0",
+      "0xffff"
+    ],
     "ipl": {
       "reg": "",
       "shift": 0,
       "mask": 0
     },
-    "rom": [["0xa000", "0xffff"]],
-    "ram": [["0x0000", "0x8fff"]]
+    "rom": [
+      [
+        "0xa000",
+        "0xffff"
+      ]
+    ],
+    "ram": [
+      [
+        "0x0000",
+        "0x8fff"
+      ]
+    ]
   },
   "inputs": {
     "coin": "Coin 1",

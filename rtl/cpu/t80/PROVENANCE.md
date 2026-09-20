@@ -62,6 +62,23 @@ Not investigated further since the actual simulation result is what matters and 
 before the hang -- worth remembering if a future VHDL-only testbench run appears to hang: check
 whether it already printed PASS/FAIL before assuming something is actually stuck.
 
+## T80 has savestate ports; `T80se` does not forward them
+
+`T80.vhd:124-127`:
+
+    REG    : out std_logic_vector(211 downto 0);  -- IFF2, IFF1, IM, IY, HL', DE', BC',
+    DIRSet : in  std_logic := '0';                -- IX, HL, DE, BC, PC, SP, R, I,
+    DIR    : in  std_logic_vector(211 downto 0);  -- F', A', F, A
+
+The whole architectural state, out and in. Of the wrappers vendored here only `T80pa` forwards
+them; `T80se`, which this core instantiates, does not.
+
+Adding it is a wrapper, not a fork: a thin local top level can instantiate `T80` directly with
+the ports exposed and leave every vendored file untouched. Recorded here because it was missed
+once already -- `sim/common/state_image.sv` restores the sound CPU with an instruction stub, and
+pays for it in a drifting R, an IFF1/IFF2 pair that cannot be set apart, and two clobbered bytes
+below SP. See `docs/STATE.md`.
+
 ## Local change: an upstream bug in the block I/O flags
 
 **`T80.vhd` is no longer byte-identical to upstream.** One line is changed, marked in place with
