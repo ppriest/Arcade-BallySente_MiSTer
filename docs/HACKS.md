@@ -55,18 +55,47 @@ registered-read ROM, read on two consecutive cycles rather than duplicated, clos
 
 Still bit-exact against the model: 38,400 samples, 0 mismatches.
 
-## The six-voice sound pipeline does not fit one shared instance at 40 MHz
+## ~~The six-voice sound pipeline does not fit one shared instance at 40 MHz~~ — settled: two pipelines
 
-Measured, not estimated: the oscillator takes 51 `clk_sys` cycles per sample (worst case, from
-`sim/cem3394_vco_tb`) and the filter 36. Six voices through one shared pipeline of each is 522
-cycles, against the 417 a 96 kHz sample has at 40 MHz.
+**One 40 MHz `clk_sys` survives.** Three voices on each of two shared pipelines fits with room
+to spare, so the roadmap's single-clock design decision stands and Phase 2's PLL is not
+constrained by sound.
 
-Options, with real numbers: two pipelines of each (261 cycles, 76 of 112 DSP blocks), or one of
-each on an audio clock of 50 MHz or more (38 DSP, a second clock domain). Sharing one multiplier
-between `vco_blep` and `vco_blamp` would cut the 33 DSP blocks the oscillator currently uses, at
-the cost of more cycles — which pushes the other way.
+Measured, not estimated. `sim/cem3394_vco_tb` now reports the six-voice sum sample by sample --
+which is what a shared pipeline has to fit, rather than six times the worst sample any one voice
+ever has -- and `sim/cem3394_lpf4_tb` reports the filter's cost and checks that its best and
+worst agree, which they do.
 
-**What would settle it:** a Phase 3 decision once the rest of the sound board exists and its own
-cycle cost is known. Recorded here because the roadmap's "one 40 MHz `clk_sys`" design decision
-does not survive this subsystem unchanged, and because the earlier estimate in the spike document
-reasoned about multiply counts rather than cycles and so got it wrong.
+| per sample period, 6 voices | mean | worst seen | bounded worst |
+|---|---|---|---|
+| a musical mix of notes (the regression vectors, up to 6.9 kHz) | 297 | 543 | 606 |
+| all six at 17.4 kHz, the top of the CEM3394's range | 393 | 561 | 606 |
+
+against **417 cycles** available at 40 MHz and 96 kHz. The bound is 6 x (60 + 41): the
+oscillator's worst sample is 60 cycles and the filter is a flat 41.
+
+The oscillator's cost is data-dependent -- a polyBLEP or polyBLAMP correction only runs near a
+discontinuity -- so its **mean is 8 cycles on a musical mix and 24 at the top of the range**,
+against that worst case of 60. The earlier entry here reasoned from 6 x 51 + 6 x 36 = 522, six
+times a worst case that a single voice reaches on a small fraction of samples, and got both the
+oscillator's worst (51, now 60 with the top of the range covered) and the filter's cost (36, in
+fact 41) wrong as well.
+
+**The decision: two pipelines, three voices each.** Bounded worst 303 of 417 cycles (73%),
+adversarial mean about 197 (47%), which leaves roughly 38 cycles a voice for the parts of the
+chain that are not written yet -- the mixer, the VCA, the RC high-pass and the noise source.
+76 of the device's 112 DSP blocks. One pipeline was rejected on the adversarial mean alone:
+393 of 417 is 94% before any of that is added.
+
+**48 kHz was rejected with a number.** Halving the rate doubles the budget to 833 cycles and
+would let one pipeline fit easily, but `python scripts/cem3394_model.py rate` measures what it
+costs: **-17.9 dBFS worst case, and error-to-signal of -1.0 dB at the worst operating point**,
+against the fixed-point datapath's -97.8 dBFS. The CEM3394's filter reaches 54 kHz at
+`filt_cv = -2` and self-oscillates there; at 48 kHz that is above Nyquist and simply cannot
+happen. It is why MAME runs `va_lpf4` at `max(96000, machine rate)` whatever the machine asks
+for, and the same constraint applies here.
+
+**Still worth doing in Phase 3:** the oscillator uses 33 DSP blocks because `vco_blep` and
+`vco_blamp` each have their own multiplier. Two pipelines have cycles to spare, so sharing one
+between them trades headroom that exists for DSP blocks that video may want.
+

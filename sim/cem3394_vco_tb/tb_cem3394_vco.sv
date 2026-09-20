@@ -29,11 +29,55 @@ module tb_cem3394_vco;
     );
 
     int      fd, code, maxfail, cycles, worst_cycles = 0;
+
+    // Per-sample cycle cost, kept per setting so the SIX-VOICE budget can be
+    // read off rather than estimated from the worst case. A shared pipeline
+    // computes all six voices inside one sample period, so what has to fit is
+    // the sum across voices at the same sample index, not six times the worst
+    // sample any one voice ever has. docs/HACKS.md, "The six-voice sound
+    // pipeline does not fit one shared instance at 40 MHz".
+    localparam int MAXSET = 8;
+    localparam int MAXSAM = 4096;
+    int      cyc [0:MAXSET-1][0:MAXSAM-1];
+    int      set_n [0:MAXSET-1];
+    longint  cyc_total = 0;
     string   vec_file;
     int      f_ph, f_inv, f_t, f_p;
     int      n_sets = 0, n_samples = 0, n_fail = 0;
     longint  v_step, v_inv, v_pw, v_n;
     longint  e_ph, e_r, e_p, e_t;
+
+    // The six-voice sum, sample by sample: what a shared pipeline has to fit.
+    task automatic report_budget();
+        int nv, ns, sum, worst_sum, over, filtcyc;
+        longint tot;
+        int hist [0:63];
+        if (!$value$plusargs("filtcyc=%d", filtcyc)) filtcyc = 41;
+        nv = (n_sets < MAXSET) ? n_sets : MAXSET;
+        ns = MAXSAM;
+        for (int v = 0; v < nv; v++) if (set_n[v] < ns) ns = set_n[v];
+        if (nv == 0 || ns == 0) return;
+        foreach (hist[k]) hist[k] = 0;
+        worst_sum = 0; tot = 0;
+        for (int i = 0; i < ns; i++) begin
+            sum = 0;
+            for (int v = 0; v < nv; v++) sum += cyc[v][i];
+            tot += sum;
+            if (sum > worst_sum) worst_sum = sum;
+            hist[(sum / 32 < 64) ? sum / 32 : 63]++;
+        end
+        $display("  mean %0d cycles/sample/voice over %0d samples",
+                 int'(cyc_total / n_samples), n_samples);
+        $display("  %0d voices together: mean %0d, worst %0d cycles per sample period",
+                 nv, int'(tot / ns), worst_sum);
+        // The filter's cost is fixed -- sim/cem3394_lpf4_tb prints it and checks
+        // that best and worst agree -- so it is added rather than measured here.
+        $display("  plus %0d filter cycles (%0d each): mean %0d, worst %0d",
+                 nv * filtcyc, filtcyc, int'(tot / ns) + nv * filtcyc,
+                 worst_sum + nv * filtcyc);
+        for (int b = 0; b < 64; b++)
+            if (hist[b]) $display("    %4d-%4d cycles : %0d samples", b * 32, b * 32 + 31, hist[b]);
+    endtask
 
     task automatic reset_dut();
         rst_n = 0;
@@ -78,6 +122,11 @@ module tb_cem3394_vco;
                 cycles = 0;
                 while (!out_valid) begin @(posedge clk); cycles++; end
                 if (cycles > worst_cycles) worst_cycles = cycles;
+                cyc_total += cycles;
+                if (n_sets <= MAXSET && i < MAXSAM) begin
+                    cyc[n_sets-1][i] = cycles;
+                    set_n[n_sets-1]  = i + 1;
+                end
                 n_samples++;
 
                 if ($signed(ramp) !== e_r || $signed(pulse) !== e_p || $signed(triang) !== e_t) begin
@@ -94,6 +143,7 @@ module tb_cem3394_vco;
 
         $display("cem3394_vco: %0d settings, %0d samples, %0d mismatches, worst %0d cycles/sample",
                  n_sets, n_samples, n_fail, worst_cycles);
+        report_budget();
         if (n_samples == 0) $fatal(1, "no vectors were run");
         if (n_fail == 0) $display("PASS bit-exact against scripts/cem3394_model.py");
         else             $display("FAIL %0d of %0d samples differ", n_fail, n_samples);

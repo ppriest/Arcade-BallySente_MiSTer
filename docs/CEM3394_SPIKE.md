@@ -240,7 +240,9 @@ Two things had to be pinned down before "bit-exact" could mean anything:
 kernels. Six oscillator settings — near-Nyquist, an exact divisor, awkward ratios, two pulse
 widths — 1920 samples each:
 
-> **11,520 samples, 0 mismatches, worst 51 cycles per sample.**
+> **11,520 samples, 0 mismatches, worst 51 cycles per sample** on the regression vectors, and
+> **11,520 more, 0 mismatches, worst 60** with all six settings at 17.4 kHz — the top of the
+> oscillator's range, which those vectors do not reach (`cem3394_model.py budget`).
 
 Two bugs were found by the bench and both were mine, not the model's: `naive_ramp` shifted one
 place too far (the 34-bit concatenation computed `(2p - 2·2^32) >> 7` instead of `(2p - 2^32) >> 6`),
@@ -249,37 +251,58 @@ to `x` — the value wanted is simply `{1'b1, x}` read as a signed 33-bit number
 
 It closes timing: **1,099 ALMs, 33 DSP blocks, +9.468 ns worst setup slack**.
 
-### The budget, which does not close as first assumed
+### The budget, measured sample by sample, and what it decides
 
 33 DSP blocks is for **one** oscillator. The plan was always to time-share one pipeline across
 the six voices rather than instantiate six, so the DSP count is not multiplied — but the
-*cycles* are, and that is what does not fit:
+*cycles* are, and how many depends on what the voices are playing: a polyBLEP or polyBLAMP
+correction only runs near a discontinuity, so an oscillator's per-sample cost is data-dependent.
 
-| | cycles/sample | ×6 voices |
-|---|---|---|
-| oscillator | 51 (measured) | 306 |
-| filter | 36 | 216 |
-| **total** | 87 | **522** |
+`sim/cem3394_vco_tb` reports the six-voice sum sample by sample, which is what a shared pipeline
+has to fit. `sim/cem3394_lpf4_tb` reports the filter's cost and checks that its best and worst
+agree — they do, at a flat 41 cycles, because the tanh lookup takes the same six cycles whatever
+it reads.
 
-A 96 kHz sample is **417** `clk_sys` cycles at 40 MHz. One shared pipeline of each needs 522.
-
-| option | cycles | DSP | |
+| per sample period, 6 voices | mean | worst seen | bounded worst |
 |---|---|---|---|
-| 1 pipeline each at 40 MHz | 522 | 38 | **does not fit** |
-| 2 pipelines each | 261 | 76 | fits, 68% of the DSPs |
-| 1 pipeline each at 50 MHz+ | 417 | 38 | fits, needs a second clock domain |
+| a musical mix of notes (the regression vectors, up to 6.9 kHz) | 297 | 543 | 606 |
+| all six at 17.4 kHz, the top of the range (`cem3394_model.py budget`) | 393 | 561 | 606 |
+
+A 96 kHz sample is **417** `clk_sys` cycles at 40 MHz. The bound is 6 × (60 + 41).
+
+| option | worst | DSP | |
+|---|---|---|---|
+| 1 pipeline each at 40 MHz | 606 | 38 | **no** — and its adversarial *mean*, 393, is already 94% |
+| 2 pipelines each, 3 voices apiece | 303 | 76 | **fits**, 73% of the budget, 68% of the DSPs |
+| 1 pipeline each at 40 MHz, 48 kHz | 606 of 833 | 38 | fits, but see below |
+| 1 pipeline each at 58 MHz+ | 606 | 38 | fits, needs a second clock domain |
+
+**Two pipelines.** The single 40 MHz `clk_sys` survives, which matters beyond sound: the
+roadmap's "every clock enable a counter tap" decision rests on all nine board clocks dividing
+exactly into 40 MHz, and a second domain would be the only exception in the design. 303 of 417
+leaves roughly 38 cycles a voice for the mixer, the VCA, the RC high-pass and the noise source,
+none of which are written.
+
+**48 kHz is rejected, with a number.** Halving the rate doubles the budget and would let one
+pipeline fit easily. `python scripts/cem3394_model.py rate` measures the cost by running the same
+voice at both rates over the 60-point grid, decimating the 96 kHz output 2:1 through a 129-tap
+windowed sinc and aligning by its group delay: **−17.9 dBFS worst case, error-to-signal −1.0 dB
+at the worst operating point**, against the fixed-point datapath's −97.8 dBFS. The cause is
+structural rather than a resolution loss — the CEM3394's filter reaches 54 kHz at `filt_cv = -2`
+and self-oscillates there, which at 48 kHz is above Nyquist and cannot happen at all. It is why
+MAME runs `va_lpf4` at `max(96000, machine rate)` whatever the machine asks for.
 
 This corrects the estimate in "Cost estimate" above, which counted **multiplies** (about 38 per
-sample, 55% of one multiplier) and not **cycles**. The sequential kernels spend more cycles than
-they do multiplies — `vco_blamp` takes 13 cycles for 9 multiplies — so the multiply count was
-the wrong budget to reason about. The roadmap's "one 40 MHz `clk_sys`, every clock enable a
-counter tap" decision needs an amendment for the sound path, and which way to go is a Phase 3
-decision with these numbers in hand rather than something to settle now.
+sample, 55% of one multiplier) and not **cycles**. It also corrects the first version of this
+section, which multiplied a single voice's worst case by six and reached 522: six times the worst
+sample any one voice ever has is not a bound a pipeline experiences, and the two numbers it used
+were both wrong as well — the oscillator's worst is 60 rather than 51 once the top of the range
+is covered, and the filter is 41 rather than 36.
 
-The 33 DSP blocks are also worth revisiting: `vco_blep` and `vco_blamp` each hold their own
-multiplier and the operands are wide (32×32, 34×34), so each multiply costs several DSPs.
-Sharing one multiplier between the two kernels would cut that substantially at the price of
-more cycles — the opposite trade to the one above, and they interact.
+The 33 DSP blocks are worth revisiting in Phase 3: `vco_blep` and `vco_blamp` each hold their own
+multiplier and the operands are wide (32×32, 34×34), so each multiply costs several DSPs. Two
+pipelines have cycles to spare, so sharing one multiplier between the two kernels trades headroom
+that exists for DSP blocks video may want.
 
 ## Result 6: the calibration loop, decoded and predicted
 
@@ -407,7 +430,8 @@ the tolerance Result 6 measured, and the search takes the same path through it.
 - **The control-voltage to frequency map is still evaluated in the bench, in real arithmetic.**
   `sim/calib_tb` proves the loop closes given a correct map; in the core the map becomes a lookup
   table feeding `cem3394_vco`'s `step`, and that table is not written.
-- **The six-voice cycle budget.** One shared pipeline does not close at 40 MHz (522 cycles
-  against 417). Two pipelines, or an audio clock of 50 MHz or more. A Phase 3 decision.
 - **The 8253 implements modes 0 and 1 only**, RW=11 binary, and asserts `unsupported` on anything
   else. That is all the boot routine uses; a game that needs more is a `HACKS.md` entry.
+- **The rest of the voice chain is model-only.** The mixer, the VCA, the RC high-pass, the
+  MM5837 noise source and the filter-FM path exist in `cem3394_model.py` and not in RTL. The
+  budget above reserves about 38 cycles a voice for them.

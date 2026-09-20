@@ -34,6 +34,12 @@ module tb_cem3394_lpf4;
     logic signed [DW-1:0] out_sample;
     logic                 busy;
 
+    // Per-sample cost, for the six-voice budget in docs/HACKS.md. The filter
+    // has no data-dependent path -- the tanh lookup takes the same six cycles
+    // whatever it reads -- so best and worst should be the same number, and
+    // this reports both so that stays checked rather than assumed.
+    int cycles, worst_cycles = 0, best_cycles = 1 << 30;
+
     string tanh_file;
 
     cem3394_lpf4 #(
@@ -66,7 +72,10 @@ module tb_cem3394_lpf4;
         in_valid  <= 1'b1;
         @(posedge clk);
         in_valid  <= 1'b0;
-        while (!out_valid) @(posedge clk);
+        cycles = 0;
+        while (!out_valid) begin @(posedge clk); cycles++; end
+        if (cycles > worst_cycles) worst_cycles = cycles;
+        if (cycles < best_cycles) best_cycles = cycles;
         y = $signed(out_sample);
         @(posedge clk);
     endtask
@@ -123,6 +132,9 @@ module tb_cem3394_lpf4;
         end
         $fclose(fd);
 
+        $display("  %0d cycles per sample (best %0d, worst %0d)%s",
+                 worst_cycles, best_cycles, worst_cycles,
+                 (best_cycles == worst_cycles) ? "" : " -- DATA DEPENDENT, the budget needs the worst");
         $display("cem3394_lpf4: %0d operating points, %0d samples, %0d mismatches",
                  n_points, n_samples, n_fail);
         if (n_samples == 0) $fatal(1, "no vectors were run");

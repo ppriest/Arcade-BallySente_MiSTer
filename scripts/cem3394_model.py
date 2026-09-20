@@ -1069,6 +1069,136 @@ def cmd_vectors(a):
     return 0
 
 
+def _halfband(ntaps=129, cutoff=0.45):
+    """Windowed-sinc low-pass for decimating 2:1. Odd length, so the group delay
+    is an integer number of output samples."""
+    m = (ntaps - 1) // 2
+    h = []
+    for i in range(ntaps):
+        k = i - m
+        x = 2.0 * cutoff * (1.0 if k == 0 else math.sin(2.0 * math.pi * cutoff * k)
+                            / (2.0 * math.pi * cutoff * k))
+        w = 0.42 - 0.5 * math.cos(2.0 * math.pi * i / (ntaps - 1))             + 0.08 * math.cos(4.0 * math.pi * i / (ntaps - 1))
+        h.append(x * w)
+    g = sum(h)
+    return [v / g for v in h], m
+
+
+def cmd_rate(a):
+    """What running the chain at 48 kHz costs against running it at 96 kHz.
+
+    The cycle budget for six voices on one shared pipeline is set by the sample
+    rate (docs/HACKS.md), so this is a design decision with a number attached
+    rather than a preference. 96 kHz is what the model has been anchored to,
+    because MAME runs va_lpf4 at max(96000, machine rate) and running the whole
+    comparison there removes MAME's own resampler from it.
+
+    Method: the same voice at both rates, the 96 kHz output decimated 2:1
+    through a 129-tap windowed sinc and aligned by the filter's integer group
+    delay, then compared sample by sample. Content between 24 and 48 kHz is
+    removed rather than counted as error -- it is inaudible and a 48 kHz chain
+    cannot represent it, so keeping it would measure the decimator.
+    """
+    h, m = _halfband()
+    ntaps = len(h)
+    delay_out = m // 2                       # in 48 kHz samples
+    points = [(v, f, r)
+              for v in (-1.0, 0.0, 1.0, 2.0)
+              for f in (-2.0, 0.0, 2.0)
+              for r in (0.0, 1.0, 2.0, 2.5, 3.0)]
+    lo, hi = 48000, 96000
+    n_lo = int(a.secs * lo)
+    print(f"{hi} Hz decimated to {lo} Hz vs a native {lo} Hz chain, "
+          f"{a.secs}s per point, {len(points)} operating points")
+    print(f"{'vco':>5} {'filt':>5} {'res':>4} {'ref rms':>9} {'err rms':>9} "
+          f"{'err/sig':>9} {'err/FS':>8}")
+    worst_fs, worst_sig, worst_row = -999.0, -999.0, None
+    for vco_cv, filt_cv, res_cv in points:
+        vh = _voice(hi, None, vco_cv, 3.0, filt_cv, res_cv)
+        vl = _voice(lo, None, vco_cv, 3.0, filt_cv, res_cv)
+        buf = [0.0] * ntaps
+        dec, nat = [], []
+        idx = 0
+        for i in range(2 * (n_lo + delay_out) + ntaps):
+            buf[idx] = vh.sample()
+            idx = (idx + 1) % ntaps
+            if i % 2 == 1 and i >= ntaps - 1:
+                acc = 0.0
+                for k in range(ntaps):
+                    acc += h[k] * buf[(idx + k) % ntaps]
+                dec.append(acc)
+        for _ in range(len(dec) + delay_out):
+            nat.append(vl.sample())
+        n = min(len(dec), len(nat) - delay_out)
+        racc = eacc = 0.0
+        for i in range(n):
+            rs = dec[i]
+            ns = nat[i + delay_out]
+            racc += rs * rs
+            eacc += (rs - ns) * (rs - ns)
+        rrms = math.sqrt(racc / n)
+        erms = math.sqrt(eacc / n)
+        sig = 20.0 * math.log10(erms / rrms) if rrms > 0 and erms > 0 else -999.0
+        fs = 20.0 * math.log10(erms) if erms > 0 else -999.0
+        if fs > worst_fs:
+            worst_fs, worst_row = fs, (vco_cv, filt_cv, res_cv)
+        worst_sig = max(worst_sig, sig)
+        print(f"{vco_cv:>5.1f} {filt_cv:>5.1f} {res_cv:>4.1f} {rrms:>9.2e} "
+              f"{erms:>9.2e} {sig:>8.1f}dB {fs:>7.1f}dB")
+    print()
+    print(f"worst {worst_fs:.1f} dBFS at vco {worst_row[0]}, filt {worst_row[1]}, "
+          f"res {worst_row[2]}; worst error-to-signal {worst_sig:.1f} dB")
+    print("A 16-bit output's own floor is -96 dBFS. The fixed-point datapath's "
+          "is -97.8 dBFS (CEM3394_SPIKE.md).")
+    return 0
+
+
+def cmd_budget(a):
+    """Oscillator vectors for the WORST case a shared six-voice pipeline can see.
+
+    `vectors` picks frequencies that land the discontinuities differently
+    against the sample grid, and tops out at 6.9 kHz. The cost of a sample is
+    data-dependent -- a polyBLEP or polyBLAMP correction only runs near a
+    discontinuity -- so the expensive samples get rarer as the note gets lower,
+    and a six-voice budget measured on those vectors is an average, not a bound.
+
+    The bound is six voices at the TOP of the CEM3394's range: cv = -4.0 is
+    431.894 * 2^(16/3) = 17.3 kHz, where a discontinuity falls every 5.5 samples
+    at 96 kHz and most samples pay for one. Six different pulse widths so the
+    pulse edges do not all coincide, which is what a real board would do.
+
+    debug/cem3394/vco_budget_vectors.txt, same format as vco_vectors.txt, so
+    sim/cem3394_vco_tb reads it with +vectors= and reports the same budget --
+    and still checks every sample, which is bit-exact coverage at the top of the
+    range that the regression vectors do not have.
+    """
+    d = out_dir()
+    vp = d / "vco_budget_vectors.txt"
+    n = int(a.secs * a.rate)
+    total = 0
+    with open(vp, "w", encoding="ascii") as f:
+        print(f"# format {VCOFixed.PH_BITS} {VCOFixed.INV_FRAC} {VCOFixed.T_FRAC} "
+              f"{VCOFixed.P_FRAC}", file=f)
+        print(f"# rate {a.rate}", file=f)
+        for pw in (0.5, 0.45, 0.55, 0.4, 0.6, 0.35):
+            fq = 431.894 * math.pow(2.0, 4.0 / 0.75)
+            osc = VCOFixed(a.rate, a.data_frac)
+            osc.set_freq(fq)
+            osc.set_pw(pw)
+            print(f"V {osc.step} {osc.inv_step} {osc.pw} {n}", file=f)
+            for _ in range(n):
+                ph = osc.phase
+                r, pu, tr = osc.step_sample()
+                print(f"S {ph} {r} {pu} {tr}", file=f)
+                total += 1
+    fq = 431.894 * math.pow(2.0, 4.0 / 0.75)
+    print(f"6 settings at {fq:.1f} Hz (cv -4.0, the top of the range), "
+          f"{n} samples each = {total} vectors -> {vp}")
+    print(f"{a.rate / fq:.2f} samples per period, so a discontinuity lands in "
+          f"most of them")
+    return 0
+
+
 def cmd_widths(a):
     """What word width the RTL datapath needs. The float model is the reference."""
     formats = [(4, 18, 17), (4, 20, 17), (4, 22, 18), (4, 24, 18),
@@ -1139,7 +1269,8 @@ def cmd_fixed(a):
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("cmd", choices=["tone", "sweep", "fixed", "widths", "vectors", "vco"])
+    ap.add_argument("cmd", choices=["tone", "sweep", "fixed", "widths", "vectors",
+                                    "vco", "budget", "rate"])
     ap.add_argument("--data-int", type=int, default=4, help="integer bits, signed")
     ap.add_argument("--data-frac", type=int, default=20)
     ap.add_argument("--coef-frac", type=int, default=17)
@@ -1159,7 +1290,9 @@ def main():
     return {"tone": cmd_tone, "sweep": cmd_sweep, "fixed": cmd_fixed,
             "widths": cmd_widths,
             "vectors": cmd_vectors,
-            "vco": cmd_vco}[a.cmd](a)
+            "vco": cmd_vco,
+            "budget": cmd_budget,
+            "rate": cmd_rate}[a.cmd](a)
 
 
 if __name__ == "__main__":
