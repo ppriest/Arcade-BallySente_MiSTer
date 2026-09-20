@@ -104,3 +104,7 @@ __pycache__/
 rtl/**/db/
 rtl/**/incremental_db/
 rtl/**/output_files/
+
+# synth_check working directories: Quartus rebuilds them from the .qsf
+/rtl/video/synth_check/db/
+/rtl/video/synth_check/incremental_db/

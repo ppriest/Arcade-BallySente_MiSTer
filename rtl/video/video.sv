@@ -1,0 +1,141 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// The video path: raster, background scanout, sprite overlay, palette.
+//
+// The board races the beam and so does this (docs/HARDWARE_NOTES.md, "Raster
+// timing"). Nothing is buffered a frame ahead: the background byte for a pixel
+// is read as that pixel is drawn, the palette entry is read as it is needed,
+// and the only buffer is the sprite engine's one line.
+//
+// HOW A PIXEL IS COLOURED. The background is a 256x240 4bpp packed bitmap, two
+// pixels a byte, high nibble left. The sprite engine supplies a 4-bit nibble
+// for the same pixel, 0 meaning transparent. The palette index is the two
+// concatenated -- SPRITE HIGH, BACKGROUND LOW -- inside the current 256-entry
+// bank, so a sprite recolours what is under it rather than replacing it. With
+// no sprite the index is just the background nibble, which is the same thing
+// with a zero high nibble.
+//
+// TIMING. Each pixel is eight clk_sys cycles (40 MHz / 5 MHz). Addresses for
+// pixel P+1 are issued while P is on screen, so every read has its two cycles
+// of block-RAM latency and the output needs no wait state:
+//
+//   phase 0   issue the background byte and the sprite nibble for P+1
+//   phase 2   both answer; form the palette index for P+1
+//   phase 3   issue the palette entry for P+1
+//   phase 5   it answers; latch the colour for P+1
+//   phase 7   the latched colour becomes the output as P+1 begins
+//
+// The palette is read 32 bits at a time, one entry a read: four bytes, big
+// endian on this board's 6809 bus, R in byte 0, G in byte 1, B in byte 2 and
+// byte 3 unused. Reading it as bytes would need three reads a pixel.
+
+module video #(
+    parameter logic [8:0] VBEND = 9'd16
+) (
+    input  logic        clk,          // clk_sys, 40 MHz
+    input  logic        rst_n,
+
+    // The palette bank, sampled per line: palette_select_w changes it mid-frame
+    // (docs/MAME_KLUDGES.md).
+    input  logic [1:0]  palbank,
+
+    // Video RAM, byte wide, 0x0800-0x7fff as 0..30719. Registered read.
+    output logic [14:0] vram_addr,
+    input  logic [7:0]  vram_q,
+
+    // Sprite RAM, the low 256 bytes. Registered read.
+    output logic [7:0]  sram_addr,
+    input  logic [7:0]  sram_q,
+
+    // Sprite ROM. Registered read.
+    output logic [15:0] rom_addr,
+    input  logic [7:0]  rom_q,
+
+    // Palette, one 32-bit entry a read. Registered.
+    output logic [9:0]  pal_addr,
+    input  logic [31:0] pal_q,
+
+    output logic [3:0]  r,
+    output logic [3:0]  g,
+    output logic [3:0]  b,
+    output logic        hsync,
+    output logic        vsync,
+    output logic        hblank,
+    output logic        vblank,
+    output logic        ce_pix
+);
+
+    logic [2:0] phase;
+    logic [8:0] hcnt, vcnt;
+    logic [7:0] row;
+    logic       visible, line_start, frame_start;
+
+    video_timing #(.VBEND(VBEND)) u_timing (
+        .clk(clk), .rst_n(rst_n),
+        .ce_pix(ce_pix), .phase(phase), .hcnt(hcnt), .vcnt(vcnt), .row(row),
+        .hblank(hblank), .vblank(vblank), .hsync(hsync), .vsync(vsync),
+        .visible(visible), .line_start(line_start), .frame_start(frame_start)
+    );
+
+    // The pixel being fetched for, one ahead of the one on screen -- and at the
+    // last pixel of a line that is pixel 0 of the NEXT line, which is why the
+    // row and the line follow it rather than following hcnt.
+    wire       last_pix = (hcnt == 9'd319);
+    wire [8:0] nx       = last_pix ? 9'd0 : hcnt + 9'd1;
+    wire [8:0] nvcnt    = last_pix ? vcnt + 9'd1 : vcnt;
+    wire [7:0] nrow     = nvcnt[7:0] - VBEND[7:0];
+    wire       nvis     = (nx < 9'd256) && (nvcnt >= VBEND) && (nvcnt < 9'd256);
+
+    // ------------------------------------------------------------- sprites
+    // Filled during this line for the next one.
+    logic [3:0] spr_nib;
+    logic       spr_busy;
+
+    sprite_engine #(.VBEND(VBEND)) u_spr (
+        .clk(clk), .rst_n(rst_n),
+        .line_start(line_start),
+        .build_line(nvcnt + 9'd1),
+        .sram_addr(sram_addr), .sram_q(sram_q),
+        .rom_addr(rom_addr), .rom_q(rom_q),
+        .disp_sel(nvcnt[0]), .disp_x(nx[7:0]), .disp_nibble(spr_nib),
+        .busy(spr_busy)
+    );
+
+    // ---------------------------------------------------------- background
+    logic [3:0] nr, ng, nb;
+    logic       vis_n;
+
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            vram_addr <= '0; pal_addr <= '0; vis_n <= 1'b0;
+            nr <= '0; ng <= '0; nb <= '0;
+            r <= '0; g <= '0; b <= '0;
+        end else begin
+            case (phase)
+                3'd0: begin
+                    // two pixels a byte: 128 bytes a row
+                    vram_addr <= {nrow, 7'b0} + 15'(nx[7:1]);
+                    vis_n     <= nvis;
+                end
+                3'd3: begin
+                    // sprite nibble high, background low, inside the bank
+                    pal_addr <= {palbank, spr_nib, nx[0] ? vram_q[3:0] : vram_q[7:4]};
+                end
+                3'd5: begin
+                    nr <= pal_q[3:0];        // byte 0
+                    ng <= pal_q[11:8];       // byte 1
+                    nb <= pal_q[19:16];      // byte 2
+                end
+                3'd7: begin
+                    // blanking is black, so the scaler sees a clean border.
+                    // vis_n belongs to the pixel just fetched, not to hcnt.
+                    r <= vis_n ? nr : 4'd0;
+                    g <= vis_n ? ng : 4'd0;
+                    b <= vis_n ? nb : 4'd0;
+                end
+                default: ;
+            endcase
+        end
+    end
+
+endmodule

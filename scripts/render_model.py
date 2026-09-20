@@ -390,6 +390,65 @@ def render_beam(start, gfx, writes, scanlog, frame, sprite_latency=1):
     return out, cov
 
 
+def emit_rtl_inputs(name):
+    """Everything sim/video_tb needs to reproduce one frame, and the frame the
+    model says it should produce.
+
+      vram.hex sram.hex pal.hex   the RAM at the frame's first line
+      writes.txt                  every write, as `beam_position region offset data`
+      expected.bin                the beam model's frame, 3 bytes a pixel
+
+    The bench mirrors the DUT's own raster counters, so `beam_position` is just
+    line * 320 + pixel and needs no handshake.
+    """
+    d = REPO / "debug" / name
+    BASE = {"spriteram": 0x0000, "videoram": 0x0800, "paletteram": 0x8000}
+    REGION = {"videoram": 0, "spriteram": 1, "paletteram": 2}
+    for f in ("start_videoram.bin", "start_spriteram.bin", "start_paletteram.bin"):
+        if not (d / f).exists():
+            sys.exit(f"{d / f} is missing -- capture with `mame_capture.py --beam`")
+
+    man = {}
+    for line in (d / "manifest.txt").read_text().splitlines():
+        k, _, v = line.partition(" ")
+        man[k] = v
+
+    def hexdump(src, dst):
+        raw = (d / src).read_bytes()
+        (d / dst).write_text("".join(f"{b:02x}\n" for b in raw), encoding="ascii")
+        return len(raw)
+
+    hexdump("start_videoram.bin", "vram.hex")
+    hexdump("start_spriteram.bin", "sram.hex")
+    hexdump("start_paletteram.bin", "pal.hex")
+
+    rows = []
+    for rname, base in BASE.items():
+        for pos, off, data in read_beamlog(d / f"beam_{rname}.txt", base):
+            rows.append((pos, REGION[rname], off, data))
+    rows.sort(key=lambda r: r[0])
+    with open(d / "writes.txt", "w", encoding="ascii") as f:
+        f.write("# beam_pos region offset data  (region 0 vram, 1 sram, 2 pal)\n")
+        for pos, reg, off, data in rows:
+            f.write(f"{pos} {reg} {off} {data}\n")
+
+    start = {n: (d / f"start_{n}.bin").read_bytes() for n in BASE}
+    writes = {n: read_beamlog(d / f"beam_{n}.txt", b) for n, b in BASE.items()}
+    gfx_path = REPO / "debug" / "rom" / f"{man['set']}_gfx1.bin"
+    gfx = gfx_path.read_bytes()
+    (d / "gfx.hex").write_text("".join(f"{b:02x}\n" for b in gfx), encoding="ascii")
+    scan = read_scanlog(d / "scan_palbank.txt")
+    frame = int(man.get("frame", 0))
+    rgb, _ = render_beam(start, gfx, writes, scan, frame)
+    (d / "expected.bin").write_bytes(bytes(rgb))
+
+    per = banks_for_frame(scan, frame)
+    (d / "palbank.txt").write_text("\n".join(str(v) for v in per) + "\n", encoding="ascii")
+    print(f"{name}: {len(rows)} writes, palette banks {sorted(set(per))} -> "
+          f"vram/sram/pal/gfx.hex, writes.txt, palbank.txt, expected.bin")
+    return 0
+
+
 # ---------------------------------------------------------------------- main
 
 def load_capture(d):
@@ -508,6 +567,9 @@ def main():
     ap.add_argument("--all", action="store_true", help="every capture that has a reference.png")
     ap.add_argument("--gfx", default=None, help="sprite ROM (default debug/rom/<set>_gfx1.bin)")
     ap.add_argument("--bank", type=int, default=None, help="override the palette bank")
+    ap.add_argument("--emit", action="store_true",
+                    help="write what sim/video_tb needs, and the frame the beam model "
+                         "says it should produce")
     a = ap.parse_args()
 
     if a.all:
@@ -533,6 +595,8 @@ def main():
 
     if not a.capture:
         ap.error("give a capture name, or --all")
+    if a.emit:
+        return emit_rtl_inputs(a.capture)
     nd, _ = check(a.capture, a.bank, a.gfx)
     return 1 if nd else 0
 

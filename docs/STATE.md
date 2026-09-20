@@ -26,7 +26,8 @@ subsystem does not exist, not that it has no state.
 | Output latch U9H (`0x9800`) | not written | 8 | yes | `m_outlatch` |
 | 8253 counters 0-2 | `rtl/sound/pit8253.sv` | 3 x (16 count + 16 value + 2 phase + mode/rw/gate flags) | yes | `pit8253_device` |
 | 6VB counter-0 flip-flop, counter control, chip select, DAC, register select | `rtl/sound/sente6vb_io.sv` | 1 + 6 + 6 + 12 + 3 | yes | `m_counter_0_ff`, `m_counter_control`, `m_chip_select`, `m_dac_value`, `m_dac_register` |
-| Sprite line buffer and its phase | not written | 240 x (4 + 1) x 2 | **no** — rebuilt every line | n/a |
+| Sprite line buffer | `rtl/video/sprite_engine.sv` | 512 x 4, one M10K | **no** — rebuilt every line, and which half is which is the line's parity rather than a saved flip-flop | n/a |
+| Video raster counters | `rtl/video/video_timing.sv` | 3 + 9 + 9 | **no** — re-derived from `frame_start` | n/a |
 
 ## Chip state
 

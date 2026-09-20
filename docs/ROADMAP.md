@@ -379,6 +379,15 @@ end-of-frame state uniformly down the screen where the board shows line 100 as R
 3. Where the RTL and MAME differ, every difference is attributable to a write during active
    display, and that is written into `docs/MAME_KLUDGES.md` rather than tuned away.
 
+**State: 1 met, 2 met, 3 open.** `rtl/video/` is written and `sim/video_tb` reproduces the beam
+model on 8 of 9 captured frames to the pixel, including frames with 2,018 mid-frame writes. The
+ninth differs on 6 pixels of 61,440 where a sprite update straddles the line the engine is
+reading it on, and the RTL is the more faithful of the two there (`docs/HACKS.md`). Standalone
+synthesis, Quartus 17.0.2, 5CSEBA6U23I7: **177 ALMs (<1%), 254 registers, 1 M10K (2,048 bits --
+the line buffer exactly), 0 DSP, worst setup slack +18.414 ns at 40 MHz, Fmax 151.84 MHz**
+(`rtl/video/synth_check/`). Criterion 3 needs the RTL-versus-MAME differences classified across
+a run, which needs the CPU driving the RAM rather than a replayed write log -- Phase 2.
+
 **Phase 2 — Hardware bring-up and the first games.**
 
 SDRAM backend with all clients, ROM download, the cartridge address mapper, `.mra` generation,
