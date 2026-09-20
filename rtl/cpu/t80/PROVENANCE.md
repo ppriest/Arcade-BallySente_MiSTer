@@ -68,13 +68,24 @@ Nothing below has been run here yet. Fuuki's and Psikyo's evidence above is why 
 low risk, not proof that this core's integration of it works.
 
 - [x] Source vendored, byte-identical to Fuuki's copy
-- [ ] Compiles clean under ModelSim in this repository
-- [ ] 6VB sound Z80 boots `sente6vb`'s ROM against a MAME bus trace
+- [x] Compiles clean under ModelSim in this repository (`sim/vhdl.files`; one
+      pre-existing upstream warning, vcom-1275 at `T80.vhd:685`, an overloaded
+      `and` with mismatched lengths -- same warning Fuuki records)
+- [x] **6VB sound Z80 boots the audio board's own ROM against a MAME bus trace**
 
 Upstream ships no testbench either, so the roadmap's criterion 1 cannot be met literally for this
-module any more than for `mc6809i`. The substitute is the same: a bus-trace diff against MAME,
-here of `:audio6vb:audiocpu` running the 6VB's own ROM. That is **scheduled in Phase 3** with the
-rest of the sound board rather than held open in Phase 0, because nothing before Phase 3
-instantiates this module. `scripts/mame_boot_trace.py` already takes a `CORE_CPU` override, so
-the harness exists; what is missing is a VHDL-capable bench (ModelSim, or GHDL conversion for
-Verilator).
+module any more than for `mc6809i`. The substitute is the same, and it is now **done**:
+
+`sim/sound_cpu_tb` runs T80se against the 6VB's own 8 KB ROM, with the board's memory map and a
+replay of any read outside ROM and RAM, and diffs every bus access against MAME's trace of
+`:audio6vb:audiocpu` (`scripts/mame_boot_trace.py cshift 60000 --cpu :audio6vb:audiocpu
+--addr-hi 0xffff --tag sente6vb`).
+
+> **60,000 bus accesses, 0 differences. Byte-identical to MAME, reads included.**
+> All 2,049 writes match in address, data and order.
+
+That is a stronger result than `mc6809i`'s, which differs on 3% of cycles in what a dead cycle
+drives. The Z80 has no equivalent: every cycle it runs is a real access.
+
+The boot window needs no replayed reads at all -- the 6VB never touches its ACIA in the first
+60,000 accesses -- so the comparison rests entirely on the CPU and the ROM.

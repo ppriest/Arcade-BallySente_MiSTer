@@ -1,0 +1,4 @@
+rtl/sound/vco_blep.sv
+rtl/sound/vco_blamp.sv
+rtl/sound/cem3394_vco.sv
+sim/cem3394_vco_tb/tb_cem3394_vco.sv

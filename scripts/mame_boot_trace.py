@@ -42,7 +42,23 @@ def trace_env(r):
             "CORE_IPL_MASK": str(ipl.get("mask", 0))}
 
 
-def run_traced(game, lua, out, env_extra, seconds):
+def cpu_overrides(cpu, space, addr_hi):
+    """Trace a CPU other than regions.json's, e.g. the 6VB's sound Z80.
+
+    The sound board runs its own program out of its own ROM, so its trace is a
+    separate reference from the main CPU's and needs its own address range.
+    """
+    env = {}
+    if cpu:
+        env["CORE_CPU"] = cpu
+    if space:
+        env["CORE_SPACE"] = space
+    if addr_hi:
+        env["CORE_ADDR_HI"] = f"{int(addr_hi, 16):x}"
+    return env
+
+
+def run_traced(game, lua, out, env_extra, seconds, tag=None):
     """Run MAME with a pinned or empty NVRAM directory; return the CompletedProcess."""
     mame_dir, exe = mame_paths()
     if out.exists():
@@ -52,8 +68,11 @@ def run_traced(game, lua, out, env_extra, seconds):
     with tempfile.TemporaryDirectory() as nv:
         if pinned.is_dir():
             shutil.copytree(pinned, Path(nv) / game)
+        # env_extra wins: it carries any CPU/space override, which must replace
+        # rather than duplicate what regions.json supplies.
         env = dict(os.environ, **trace_env(regions()), **lua_runner_env(lua),
-                   CORE_OUT=out.as_posix(), CORE_TAG=game, **env_extra)
+                   CORE_OUT=out.as_posix(), CORE_TAG=(tag or game))
+        env.update(env_extra)
         cmd = mame_cmd(exe, game, lua, mame_dir,
                        ["-nvram_directory", nv, "-seconds_to_run", str(seconds)])
         return subprocess.run(cmd, cwd=mame_dir, env=env, capture_output=True, text=True,
@@ -78,10 +97,17 @@ def main():
     ap.add_argument("game")
     ap.add_argument("n", type=int, help="accesses to log")
     ap.add_argument("--seconds", type=int, default=30, help="MAME -seconds_to_run backstop")
+    ap.add_argument("--cpu", default=None,
+                    help="CPU tag to trace instead of regions.json's, e.g. :audio6vb:audiocpu")
+    ap.add_argument("--space", default=None, help="address space (default program)")
+    ap.add_argument("--addr-hi", default=None, help="top of that CPU's address space, hex")
+    ap.add_argument("--tag", default=None, help="output label (default the set name)")
     a = ap.parse_args()
-    out = REPO / "debug" / f"{a.game}-boot"
-    r = run_traced(a.game, "boottrace.lua", out, {"CORE_TRACE_N": str(a.n)}, a.seconds)
-    check(out / f"{a.game}_boot.trace", r)
+    tag = a.tag or a.game
+    out = REPO / "debug" / f"{tag}-boot"
+    extra = {"CORE_TRACE_N": str(a.n), **cpu_overrides(a.cpu, a.space, a.addr_hi)}
+    r = run_traced(a.game, "boottrace.lua", out, extra, a.seconds, tag=tag)
+    check(out / f"{tag}_boot.trace", r)
     return 0
 
 

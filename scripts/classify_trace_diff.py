@@ -99,8 +99,11 @@ def main():
         for i, m, r in functional[:10]:
             print(f"  cycle {i + 1}: MAME {m}  RTL {r}")
         return 1
-    print("\nNo functional difference: every disagreement is which address a "
-          "non-VMA or prefetch cycle drives.")
+    if total == 0:
+        print(f"\nIdentical: all {n} cycles match MAME exactly, reads included.")
+    else:
+        print("\nNo functional difference: every disagreement is which address a "
+              "non-VMA or prefetch cycle drives.")
     return 0
 
 

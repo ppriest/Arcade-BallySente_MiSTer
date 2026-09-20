@@ -73,7 +73,8 @@ fi
 # stale module" failure.
 #
 # Deliberate exclusions:
-#   rtl/synth_check/        Quartus-only harnesses with their own top levels
+#   */synth_check/          Quartus-only harnesses with their own top levels
+#                           (rtl/cpu/synth_check, rtl/sound/synth_check)
 #   screen_rotate*.sv       vendored MiSTer-devel code that uses its variables
 #                           before declaring them. Quartus and Verilator accept
 #                           it, ModelSim's vlog does not (vlog-2730), and it
@@ -81,17 +82,25 @@ fi
 #                           simulation rather than patched. Still synthesized.
 #   *_upstream_reference.*  pristine upstream copies kept beside the vendored
 #                           modules purely so local changes can be diffed.
+#   mc6809i.v               vendored, and its `ifdef SIMULATION block reads
+#                           CpuState above the declaration. Verilator and
+#                           Quartus accept the forward reference, ModelSim's
+#                           vlog does not (vlog-2730). The file must stay
+#                           UNTOUCHED, so it is left out of ModelSim rather
+#                           than patched; it is verified under Verilator
+#                           instead (sim/cpu_boot_tb). Still synthesized.
 #   cos.sv, lfsr.v, mycore.v  Template_MiSTer's demo core. Excluded now, and to
 #                           be DELETED once <Name>.sv becomes the real top
 #                           level; the exclusions stay so a stray copy cannot
 #                           creep back in.
 RTL=$(find rtl -name '*.sv' \
-        -not -path 'rtl/synth_check/*' \
+        -not -path '*/synth_check/*' \
         -not -name 'screen_rotate*.sv' \
         -not -name '*_upstream_reference.sv' \
         -not -name 'cos.sv' | sort)
 VLOG=$(find rtl -name '*.v' \
-        -not -path 'rtl/synth_check/*' \
+        -not -path '*/synth_check/*' \
+        -not -name 'mc6809i*.v' \
         -not -name 'pll*.v' \
         -not -name 'lfsr.v' -not -name 'mycore.v' \
         -not -name '*_upstream_reference.v' | sort)

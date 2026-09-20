@@ -231,6 +231,109 @@ Two things had to be pinned down before "bit-exact" could mean anything:
   interpolation fraction of defined width, round-half-up on the product. The model emits the
   table the RTL reads, so there is one definition of it and the two cannot drift apart.
 
+## Result 5: the oscillator in RTL, bit-exact, and the six-voice budget
+
+    python scripts/cem3394_model.py vectors --data-frac 26 --coef-frac 22 --coef-int 4
+    scripts/run_verilator.sh cem3394_vco_tb
+
+`rtl/sound/cem3394_vco.sv`, with `vco_blep.sv` and `vco_blamp.sv` as the two anti-aliasing
+kernels. Six oscillator settings — near-Nyquist, an exact divisor, awkward ratios, two pulse
+widths — 1920 samples each:
+
+> **11,520 samples, 0 mismatches, worst 51 cycles per sample.**
+
+Two bugs were found by the bench and both were mine, not the model's: `naive_ramp` shifted one
+place too far (the 34-bit concatenation computed `(2p - 2·2^32) >> 7` instead of `(2p - 2^32) >> 6`),
+and the "just before a discontinuity" delta was written as `{1'b1, x} - 2^32`, which cancels back
+to `x` — the value wanted is simply `{1'b1, x}` read as a signed 33-bit number.
+
+It closes timing: **1,099 ALMs, 33 DSP blocks, +9.468 ns worst setup slack**.
+
+### The budget, which does not close as first assumed
+
+33 DSP blocks is for **one** oscillator. The plan was always to time-share one pipeline across
+the six voices rather than instantiate six, so the DSP count is not multiplied — but the
+*cycles* are, and that is what does not fit:
+
+| | cycles/sample | ×6 voices |
+|---|---|---|
+| oscillator | 51 (measured) | 306 |
+| filter | 36 | 216 |
+| **total** | 87 | **522** |
+
+A 96 kHz sample is **417** `clk_sys` cycles at 40 MHz. One shared pipeline of each needs 522.
+
+| option | cycles | DSP | |
+|---|---|---|---|
+| 1 pipeline each at 40 MHz | 522 | 38 | **does not fit** |
+| 2 pipelines each | 261 | 76 | fits, 68% of the DSPs |
+| 1 pipeline each at 50 MHz+ | 417 | 38 | fits, needs a second clock domain |
+
+This corrects the estimate in "Cost estimate" above, which counted **multiplies** (about 38 per
+sample, 55% of one multiplier) and not **cycles**. The sequential kernels spend more cycles than
+they do multiplies — `vco_blamp` takes 13 cycles for 9 multiplies — so the multiply count was
+the wrong budget to reason about. The roadmap's "one 40 MHz `clk_sys`, every clock enable a
+counter tap" decision needs an amendment for the sound path, and which way to go is a Phase 3
+decision with these numbers in hand rather than something to settle now.
+
+The 33 DSP blocks are also worth revisiting: `vco_blep` and `vco_blamp` each hold their own
+multiplier and the operands are wide (32×32, 34×34), so each multiply costs several DSPs.
+Sharing one multiplier between the two kernels would cut that substantially at the price of
+more cycles — the opposite trade to the one above, and they interact.
+
+## Result 6: the calibration loop, decoded and predicted
+
+    python scripts/mame_boot_trace.py cshift 40000 --cpu :audio6vb:audiocpu         --space io --addr-hi 0xff --tag sente6vb_io
+
+Tracing the 6VB's **I/O** space (the program-space trace does not see it) shows exactly what the
+self-calibration does, and it is simpler than expected.
+
+Boot programs the 8253 — `0x32` to counter 0 (mode 1, one-shot, LSB then MSB), `0x70` and `0xB0`
+to counters 1 and 2 (mode 0) — then writes all eight control registers of all six chips. After
+that the pattern repeats 6,087 times: write the 12-bit DAC (ports 0x0A/0x0B), select a register
+(0x0C), pulse the chip select `0xFE` then `0xFF` so the value latches on the rising edge, then
+poll port 0x08 (9,039 reads) and finally read counter 1 (ports 0x00/0x01, 60 reads — 30
+measurements, LSB then MSB).
+
+**Counter 0 is programmed to span exactly one period of the voice oscillator clocking its
+flip-flop, gating counter 1, which counts down from 0xFFFF at 2 MHz** (8 MHz / 4,
+`sente6vb.cpp:125`). So the routine measures an oscillator period in 2 MHz ticks:
+
+> `counter1 = 0xFFFF - round(2e6 / f_vco)`
+
+Checked against the reconstructed DAC values in MAME's own trace, for the first voice's
+register-0 sweep — which is a **binary search**, the CV stepping −0.002, +0.998, +1.248, +1.279,
++1.295, halving each time:
+
+| VCO CV | f | predicted count | MAME read | Δ |
+|---|---|---|---|---|
+| −0.002 | 432.693 Hz | 60913 | 60913 | 0 |
+| +0.998 | 171.714 Hz | 53888 | 53888 | 0 |
+| +1.248 | 136.290 Hz | 50860 | 50860 | 0 |
+| +1.279 | 132.440 Hz | 50434 | 50431 | 3 |
+| +1.295 | 130.496 Hz | 50209 | 50211 | −2 |
+
+Exact on three points and within 3 counts of 65,535 on the other two.
+
+**And the RTL oscillator gives the same counts.** Feeding its Q0.32 quantised frequency through
+the same formula reproduces MAME's readings to within 3 counts — 0.005%, far inside the binary
+search's step at every iteration:
+
+| VCO CV | MAME | RTL | Δ |
+|---|---|---|---|
+| −0.002 | 60913 | 60913 | 0 |
+| +0.998 | 53888 | 53888 | 0 |
+| +1.248 | 50860 | 50860 | 0 |
+| +1.279 | 50431 | 50434 | +3 |
+| +1.295 | 50211 | 50209 | −2 |
+
+**What this establishes, and what it does not.** It establishes that the quantity the calibration
+routine measures is the same under the RTL oscillator as under MAME, so the search will take the
+same path and converge on the same CV. It does **not** run the routine: the 8253, the counter-0
+flip-flop and the I/O decode are not written yet, and until they are, criterion 5's second half
+is *predicted to pass with the mechanism quantified*, not met. What is no longer needed is a
+guess — the bench to build is now fully specified, and its expected output is a formula.
+
 ## What is not done
 
 - **Nothing in RTL.** The model is the specification the RTL will be written against; the RTL is

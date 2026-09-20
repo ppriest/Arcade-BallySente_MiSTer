@@ -53,3 +53,19 @@ registered-read ROM, read on two consecutive cycles rather than duplicated, clos
 | Fmax | — | **61.12 MHz** |
 
 Still bit-exact against the model: 38,400 samples, 0 mismatches.
+
+## The six-voice sound pipeline does not fit one shared instance at 40 MHz
+
+Measured, not estimated: the oscillator takes 51 `clk_sys` cycles per sample (worst case, from
+`sim/cem3394_vco_tb`) and the filter 36. Six voices through one shared pipeline of each is 522
+cycles, against the 417 a 96 kHz sample has at 40 MHz.
+
+Options, with real numbers: two pipelines of each (261 cycles, 76 of 112 DSP blocks), or one of
+each on an audio clock of 50 MHz or more (38 DSP, a second clock domain). Sharing one multiplier
+between `vco_blep` and `vco_blamp` would cut the 33 DSP blocks the oscillator currently uses, at
+the cost of more cycles — which pushes the other way.
+
+**What would settle it:** a Phase 3 decision once the rest of the sound board exists and its own
+cycle cost is known. Recorded here because the roadmap's "one 40 MHz `clk_sys`" design decision
+does not survive this subsystem unchanged, and because the earlier estimate in the spike document
+reasoned about multiply counts rather than cycles and so got it wrong.
