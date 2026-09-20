@@ -3,6 +3,14 @@
 --
 --   CORE_OUT, CORE_TAG      output directory and filename prefix
 --   CORE_SECONDS            emulated seconds to log
+--   CORE_COIN               second at which to insert a coin and then press
+--                           Start; 0 leaves the machine in attract. Without
+--                           this every cartridge sounds the SAME: the 6VB's
+--                           boot and self-calibration routine lives in the audio
+--                           board's own ROM, so the first seconds of control
+--                           writes are byte-identical across games, and MAME's
+--                           audio for four different games agreed to -112 dB.
+--   CORE_IN_COIN, CORE_IN_START   input field names (regions.json "inputs")
 --
 -- Ports logged (sente6vb.cpp io_map, global mask 0xff):
 --   08-09  counter control; bit 0 is the audio enable
@@ -65,7 +73,32 @@ core_subs[#core_subs + 1] = io_space:install_write_tap(0x00, 0xff, "core_snd_w",
         return data
     end)
 
+-- Coin and start, driven off the frame counter the way wtiming.lua does it.
+local COIN = tonumber(os.getenv("CORE_COIN") or "0")
+
+local function field(name)
+    for _, port in pairs(mach.ioport.ports) do
+        local f = port.fields[name]
+        if f then return f end
+    end
+    return nil
+end
+
+local f_coin  = COIN > 0 and field(os.getenv("CORE_IN_COIN") or "Coin 1") or nil
+local f_start = COIN > 0 and field(os.getenv("CORE_IN_START") or "1 Player Start") or nil
+if COIN > 0 and not (f_coin and f_start) then
+    f:write("# WARNING: coin or start field not found; running attract only\n")
+end
+
+local frame = 0
 core_subs[#core_subs + 1] = emu.add_machine_frame_notifier(function()
     if done then return end
+    frame = frame + 1
+    if f_coin and f_start then
+        -- Held for six frames each: one frame is below the game's own debounce.
+        local c = math.floor(COIN * 60)
+        f_coin:set_value((frame >= c and frame < c + 6) and 1 or 0)
+        f_start:set_value((frame >= c + 90 and frame < c + 96) and 1 or 0)
+    end
     if mach.time:as_double() >= SECONDS then stop() end
 end)

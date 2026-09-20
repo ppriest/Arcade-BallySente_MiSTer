@@ -1,0 +1,3 @@
+rtl/sound/tanh_lut.sv
+rtl/sound/cem3394_lpf4.sv
+sim/cem3394_lpf4_tb/tb_cem3394_lpf4.sv

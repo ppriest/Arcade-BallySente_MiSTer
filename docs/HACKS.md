@@ -37,3 +37,19 @@ tell "never had it" from "had it and fixed it". Delete a row once nothing else r
 
 | What | Removed by | Replaced with |
 |---|---|---|
+
+## ~~cem3394_lpf4 misses 40 MHz at the cold corner~~ — fixed
+
+The `tanh` table was inferred as LUTs, putting the `u_pre -> u` path 0.288 ns over at the -40 C
+corner and costing most of the module's 1,669 ALMs. Moving it into `rtl/sound/tanh_lut.sv` as a
+registered-read ROM, read on two consecutive cycles rather than duplicated, closed it:
+
+| | before | after |
+|---|---|---|
+| ALMs | 1,669 | **827** |
+| RAM blocks | 0 | **6** (30,750 bits) |
+| DSP blocks | 5 | 5 |
+| worst setup slack | **-0.288 ns** | **+7.985 ns** |
+| Fmax | — | **61.12 MHz** |
+
+Still bit-exact against the model: 38,400 samples, 0 mismatches.

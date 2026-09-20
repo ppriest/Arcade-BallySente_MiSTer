@@ -111,4 +111,11 @@ that is ~297k opcode fetches per second.
 - [x] Boots `sentetst`, 400k cycles, writes identical to MAME's
 - [ ] jtcores differential harness evaluated (would add instruction coverage this boot does not reach)
 - [ ] Compiles clean under ModelSim
-- [ ] Standalone Fmax and area at this project's settings
+- [x] Standalone Fmax and area at this project's settings
+
+Criterion 4, from `rtl/cpu/synth_check` (Quartus 17.0.2, 5CSEBA6U23I7, the device
+`sys/sys.tcl` selects): **1,472 ALMs (4% of the part)**, 367 registers, no block RAM, no DSP.
+Against a 40 MHz `clk_sys` the worst setup slack is **+12.389 ns** and hold **+0.389 ns**, TNS
+zero on every corner. Reported **Fmax 79.3 MHz** with the `cen_E` multicycle the design actually
+has (the core advances one clock in 32), and **51.78 MHz** with every timing exception removed.
+Either way the core closes 40 MHz with room; the pessimistic number still has 29% headroom.

@@ -24,7 +24,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "scripts"))
 from mame_capture import (LUA_DIR, NO_WINDOW, check_lua_error,  # noqa: E402
-                          lua_runner_env, mame_paths, rompath)
+                          lua_runner_env, mame_paths, regions, rompath)
 
 
 def main():
@@ -33,6 +33,10 @@ def main():
     ap.add_argument("seconds", type=float, nargs="?", default=10.0,
                     help="emulated seconds to record")
     ap.add_argument("--rate", type=int, default=96000)
+    ap.add_argument("--coin", type=float, default=5.0,
+                    help="second at which to coin up and press Start; 0 for attract only. "
+                         "Without it every cartridge produces the same audio -- the 6VB's "
+                         "boot and calibration routine is in the audio board's own ROM.")
     a = ap.parse_args()
 
     mame_dir, exe = mame_paths()
@@ -43,9 +47,12 @@ def main():
     wav = out / f"{a.game}.wav"
 
     with tempfile.TemporaryDirectory() as nv:
+        inputs = regions().get("inputs", {})
         env = dict(os.environ, **lua_runner_env("sndtrace.lua"),
                    CORE_OUT=out.as_posix(), CORE_TAG=a.game,
-                   CORE_SECONDS=str(a.seconds))
+                   CORE_SECONDS=str(a.seconds), CORE_COIN=str(a.coin),
+                   CORE_IN_COIN=inputs.get("coin", "Coin 1"),
+                   CORE_IN_START=inputs.get("start", "1 Player Start"))
         cmd = [str(exe), a.game, "-nodebug", "-nowindow", "-video", "none",
                "-skip_gameinfo", "-nothrottle", "-autoboot_delay", "0",
                "-autoboot_script", str(LUA_DIR / "run.lua"),

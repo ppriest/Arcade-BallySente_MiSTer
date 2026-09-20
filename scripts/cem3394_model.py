@@ -184,12 +184,20 @@ class Fixed:
     not how precisely a rare coefficient update can be computed.
     """
 
-    def __init__(self, data_int=4, data_frac=20, coef_frac=17):
+    # Coefficients are NOT all below 1.0: `res` reaches 4.8 at the top of the
+    # resonance range, `gain_comp` reaches 1 + 0.2*4.8 = 1.96, and `alpha0` is
+    # exactly 1.0 when there is no resonance. Four integer bits including sign
+    # covers them with room; giving them only a sign bit wraps 1.0 to -1.0.
+    def __init__(self, data_int=4, data_frac=20, coef_frac=17, coef_int=4):
         self.data_frac = data_frac
         self.coef_frac = coef_frac
+        self.coef_int = coef_int
         self.data_max = (1 << (data_int + data_frac - 1)) - 1
         self.data_min = -(1 << (data_int + data_frac - 1))
+        self.coef_max = (1 << (coef_int + coef_frac - 1)) - 1
+        self.coef_min = -(1 << (coef_int + coef_frac - 1))
         self.clipped = 0
+        self.coef_clipped = 0
 
     def q(self, x):
         """Quantise a data value to the datapath format."""
@@ -203,8 +211,13 @@ class Fixed:
         return v / float(1 << self.data_frac)
 
     def qc(self, x):
-        """Quantise a coefficient."""
-        return int(math.floor(x * (1 << self.coef_frac) + 0.5)) / float(1 << self.coef_frac)
+        """Quantise a coefficient. A coefficient that does not fit is a design
+        error, not something to silently wrap: it is reported."""
+        v = int(math.floor(x * (1 << self.coef_frac) + 0.5))
+        if v > self.coef_max or v < self.coef_min:
+            self.coef_clipped += 1
+            v = min(self.coef_max, max(self.coef_min, v))
+        return v / float(1 << self.coef_frac)
 
     def mul(self, a, b):
         """One DSP multiply: full product, then rounded back to the datapath."""
@@ -212,26 +225,50 @@ class Fixed:
 
 
 class TanhLUT:
-    """tanh as an RTL would do it: a table over [0, x_max] with linear
-    interpolation, odd-symmetric, saturating to 1 beyond the table."""
+    """tanh as an RTL does it, to the bit.
 
-    def __init__(self, fx, entries=1024, x_max=4.0):
+    A table of 2^LOG2N + 1 entries over [0, 4) with linear interpolation, odd
+    symmetric, saturating to the last entry beyond the table. Every step is
+    expressed the way the hardware will do it, so the RTL can be compared
+    bit-for-bit rather than approximately:
+
+      index    the top LOG2N bits of |x| above the x_max scale. x_max is 4 and
+               the table is indexed by |x| * 2^LOG2N / 4, which for a value with
+               `data_frac` fraction bits is a right shift by
+               (data_frac + 2 - LOG2N) -- no multiply.
+      fraction the bits below the index, used as an unsigned fraction with
+               FRAC_BITS of precision.
+      output   tab[i] + (tab[i+1] - tab[i]) * frac, rounded to the datapath.
+    """
+
+    LOG2N = 10
+    X_MAX = 4.0
+
+    def __init__(self, fx):
         self.fx = fx
-        self.n = entries
-        self.x_max = x_max
-        self.tab = [fx.q(math.tanh(i * x_max / entries)) for i in range(entries + 1)]
+        self.n = 1 << self.LOG2N
+        # |x| >> SHIFT is the table index; the low SHIFT bits are the fraction.
+        self.shift = fx.data_frac + 2 - self.LOG2N
+        if self.shift < 0:
+            raise ValueError("data_frac too small for this table size")
+        self.frac_bits = self.shift
+        self.tab = [fx.q(math.tanh(i * self.X_MAX / self.n)) for i in range(self.n + 1)]
+        self.tab_i = [int(round(v * (1 << fx.data_frac))) for v in self.tab]
 
     def __call__(self, x):
+        fx = self.fx
         neg = x < 0.0
-        a = -x if neg else x
-        if a >= self.x_max:
-            y = self.tab[self.n]
+        a = int(round((-x if neg else x) * (1 << fx.data_frac)))
+        if a >= self.n << self.shift:
+            y = self.tab_i[self.n]
         else:
-            pos = a * self.n / self.x_max
-            i = int(pos)
-            f = pos - i
-            y = self.fx.q(self.tab[i] + (self.tab[i + 1] - self.tab[i]) * f)
-        return -y if neg else y
+            i = a >> self.shift
+            frac = a & ((1 << self.frac_bits) - 1)
+            d = self.tab_i[i + 1] - self.tab_i[i]
+            # round-half-up on the interpolation product, as the RTL will
+            y = self.tab_i[i] + ((d * frac + (1 << (self.frac_bits - 1))) >> self.frac_bits)
+        v = -y if neg else y
+        return v / float(1 << fx.data_frac)
 
 
 class LPF4:
@@ -719,6 +756,70 @@ def fixed_error_scan(rate, secs, fx_args, points=None):
 OSC_RES = 4.0
 
 
+def cmd_vectors(a):
+    """Bit-exact stimulus and expected output for the RTL ladder filter.
+
+    The filter is the part of the chain with a feedback loop, so it is the part
+    where fixed point can misbehave and the part the RTL is checked against
+    first. Everything is written as INTEGERS in the datapath's own format: the
+    RTL has to reproduce them exactly, not approximately.
+
+    debug/cem3394/lpf4_vectors.txt
+      header   data_int data_frac coef_frac tanh_log2n tanh_shift
+      coeffs   one line per operating point: alpha beta0..3 alpha0 res gcomp
+      samples  in out, one line each, grouped under their coefficient line
+    """
+    fx = Fixed(data_int=a.data_int, data_frac=a.data_frac, coef_frac=a.coef_frac,
+               coef_int=a.coef_int)
+    tl = TanhLUT(fx)
+    d = out_dir()
+    p = d / "lpf4_vectors.txt"
+    qd = lambda v: int(round(v * (1 << fx.data_frac)))     # noqa: E731
+    qc = lambda v: int(round(v * (1 << fx.coef_frac)))     # noqa: E731
+
+    points = [(fc, res_cv) for fc in (200.0, 1300.0, 8000.0, 30000.0)
+              for res_cv in (0.0, 1.0, 2.0, 2.5, 3.0)]
+    n = int(a.secs * a.rate)
+    total = 0
+    with open(p, "w", encoding="ascii") as f:
+        print(f"# format {a.data_int} {a.data_frac} {a.coef_int} {a.coef_frac} "
+              f"{TanhLUT.LOG2N} {tl.shift}", file=f)
+        print(f"# rate {a.rate} points {len(points)} samples_per_point {n}", file=f)
+        for fc, res_cv in points:
+            flt = LPF4(a.rate, fx=fx)
+            flt.set_freq(fc)
+            flt.set_res(0.0 if res_cv < 0 else 4.0 * res_cv / 2.5)
+            print(f"C {qc(flt.alpha[0])} {qc(flt.beta[0])} {qc(flt.beta[1])} "
+                  f"{qc(flt.beta[2])} {qc(flt.beta[3])} {qc(flt.alpha0)} "
+                  f"{qc(flt.res)} {qc(flt.gain_comp_scale)} {n}", file=f)
+            # A sawtooth at 431.894 Hz (the chip's zero-CV pitch) scaled to the
+            # mixer gain a real voice would apply: enough level to exercise the
+            # saturator without pinning it.
+            step = 431.894 / a.rate
+            ph = 0.0
+            for _ in range(n):
+                s = fx.q((2.0 * ph - 1.0) * 0.4)
+                ph = fpmod1(ph + step)
+                y = flt.process(s, 0.0)
+                print(f"S {qd(s)} {qd(y)}", file=f)
+                total += 1
+    # The tanh table, as the RTL reads it. Written here so there is exactly one
+    # definition of it and the two sides cannot drift apart.
+    tp = d / "tanh_table.hex"
+    width = (a.data_int + a.data_frac + 3) // 4
+    with open(tp, "w", encoding="ascii") as f:
+        for v in tl.tab_i:
+            print(f"{v & ((1 << (a.data_int + a.data_frac)) - 1):0{width}x}", file=f)
+    print(f"{len(tl.tab_i)} tanh entries -> {tp}")
+
+    print(f"{len(points)} operating points x {n} samples = {total} vectors -> {p}")
+    if fx.coef_clipped:
+        print(f"WARNING {fx.coef_clipped} coefficients did not fit Q{a.coef_int}.{a.coef_frac}")
+    print(f"format Q{a.data_int}.{a.data_frac}, Q{a.coef_int}.{a.coef_frac} coefficients, "
+          f"tanh {1 << TanhLUT.LOG2N}-entry table, {tl.shift}-bit interpolation fraction")
+    return 0
+
+
 def cmd_widths(a):
     """What word width the RTL datapath needs. The float model is the reference."""
     formats = [(4, 18, 17), (4, 20, 17), (4, 22, 18), (4, 24, 18),
@@ -789,10 +890,12 @@ def cmd_fixed(a):
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("cmd", choices=["tone", "sweep", "fixed", "widths"])
+    ap.add_argument("cmd", choices=["tone", "sweep", "fixed", "widths", "vectors"])
     ap.add_argument("--data-int", type=int, default=4, help="integer bits, signed")
     ap.add_argument("--data-frac", type=int, default=20)
     ap.add_argument("--coef-frac", type=int, default=17)
+    ap.add_argument("--coef-int", type=int, default=4,
+                    help="coefficient integer bits including sign; res reaches 4.8")
     ap.add_argument("--target-dbfs", type=float, default=-90.0,
                     help="noise floor the datapath must reach, relative to full scale")
     ap.add_argument("--rate", type=int, default=96000,
@@ -805,7 +908,8 @@ def main():
     ap.add_argument("--res-cv", type=float, default=0.0)
     a = ap.parse_args()
     return {"tone": cmd_tone, "sweep": cmd_sweep, "fixed": cmd_fixed,
-            "widths": cmd_widths}[a.cmd](a)
+            "widths": cmd_widths,
+            "vectors": cmd_vectors}[a.cmd](a)
 
 
 if __name__ == "__main__":

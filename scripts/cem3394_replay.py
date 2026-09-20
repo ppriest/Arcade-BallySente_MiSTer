@@ -156,6 +156,12 @@ def main():
     ap.add_argument("--rate", type=int, default=96000)
     ap.add_argument("--secs", type=float, default=None,
                     help="how much to replay; default the whole trace")
+    ap.add_argument("--skip", type=float, default=0.0,
+                    help="seconds to run but NOT compare. The 6VB's boot and "
+                         "self-calibration sequence lives in the audio board ROM and is "
+                         "byte-identical across cartridges for the first ~3 s, so a "
+                         "comparison that starts at 0 tests that sequence and not the game. "
+                         "The model is still run from 0, because its state depends on it.")
     a = ap.parse_args()
 
     base = REPO / "debug" / f"{a.game}-snd"
@@ -213,8 +219,14 @@ def main():
         return 0
 
     full_ref = ref
-    m = min(len(ref), len(out))
-    ref, mod = ref[:m], out[:m]
+    skip = int(a.skip * a.rate)
+    if skip >= min(len(ref), len(out)):
+        sys.exit(f"--skip {a.skip}s leaves nothing to compare")
+    m = min(len(ref), len(out)) - skip
+    ref, mod = ref[skip:skip + m], out[skip:skip + m]
+    full_ref = full_ref[skip:]
+    if skip:
+        print(f"comparing from {a.skip:.1f}s ({m} samples); the model ran from 0")
     r_rms, m_rms = float(np.sqrt((ref ** 2).mean())), float(np.sqrt((mod ** 2).mean()))
     if r_rms <= 0 or m_rms <= 0:
         print("one side is silent; nothing to compare")

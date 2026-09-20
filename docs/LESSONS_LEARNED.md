@@ -783,6 +783,22 @@ mirror passes a fill-then-verify test if a write tap shows nothing else writes t
 
 ## Timing closure
 
+- **[BallySente] Ask the timing analyser which path fails; do not reason about it.** A filter
+  missed 25 ns by 0.182 ns. The critical path "obviously" ran through the shared multiplier, so
+  the operand mux was registered -- still short. Then the mux was given its own cycle -- slack got
+  slightly WORSE, -0.288 ns. One `get_timing_paths -setup -npaths 3` named it immediately: the
+  failing path was `u_pre -> u`, a 1025-entry `tanh` table the fitter had put in LUTs instead of
+  an M10K, nowhere near the multiplier. Two restructures of correct, verified RTL were spent on
+  guesses. The query costs seconds:
+
+      create_timing_netlist -model slow -temperature -40 -voltage 1100
+      read_sdc <the sdc>; update_timing_netlist
+      foreach_in_collection p [get_timing_paths -setup -npaths 3 -detail path_only] {
+          post_message -type info [format "SLACK %s FROM %s TO %s" [get_path_info $p -slack]               [get_node_info [get_path_info $p -from] -name]               [get_node_info [get_path_info $p -to] -name]] }
+
+  The corollary: check the fit report's RAM-block count against what the design should infer. A
+  table that was meant to be block RAM and landed in logic shows up as an ALM count that looks
+  wrong AND as a path that will not close.
 ### Open the STA summary before believing any hardware-vs-simulation divergence
 
 Quartus reports "Fitter was successful" on a design that grossly fails timing; nothing in the
@@ -1057,6 +1073,16 @@ ack address that is also an input port must acknowledge on writes only.
 
 ## Driving MAME as a reference generator (Lua)
 
+- **[BallySente] A sound reference captured without starting the game is the SOUND BOARD's boot
+  routine, not the game's.** Four Bally/Sente cartridges were captured for 10 s each and replayed
+  against the model, and all four produced identical numbers to four significant figures. That
+  looked like a bug in the replay; it was not. The 6VB audio board runs its own ROM, so its boot
+  and self-calibration sequence is byte-identical across cartridges -- the first 3 s were the same
+  66,882 control writes in every set, and MAME's own audio for four different games agreed to
+  -112 dB over the whole 10 s, because none of them had reached game audio. Insert a coin and
+  press Start (the `wtiming.lua` field pattern), then compare from after the attract sequence.
+  The check that catches this cheaply: diff the REFERENCE captures against each other first. If
+  two different games give the same reference, the stimulus is not the game.
 - **[Fuuki] [GX] Keep every Lua subscription in a GLOBAL.** `add_machine_frame_notifier` and
   `install_write_tap` return subscription objects; dropped, the GC reclaims them and the callback
   silently stops firing, exit 0. A `local subs = {}` at chunk scope is not enough: chunk-locals

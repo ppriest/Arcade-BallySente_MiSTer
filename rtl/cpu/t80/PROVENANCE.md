@@ -70,3 +70,11 @@ low risk, not proof that this core's integration of it works.
 - [x] Source vendored, byte-identical to Fuuki's copy
 - [ ] Compiles clean under ModelSim in this repository
 - [ ] 6VB sound Z80 boots `sente6vb`'s ROM against a MAME bus trace
+
+Upstream ships no testbench either, so the roadmap's criterion 1 cannot be met literally for this
+module any more than for `mc6809i`. The substitute is the same: a bus-trace diff against MAME,
+here of `:audio6vb:audiocpu` running the 6VB's own ROM. That is **scheduled in Phase 3** with the
+rest of the sound board rather than held open in Phase 0, because nothing before Phase 3
+instantiates this module. `scripts/mame_boot_trace.py` already takes a `CORE_CPU` override, so
+the harness exists; what is missing is a VHDL-capable bench (ModelSim, or GHDL conversion for
+Verilator).
