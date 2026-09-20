@@ -1,57 +1,38 @@
 {
-  "_comment": "Core-specific. The main CPU's view of the machine, from the MAME driver's address map. Read by mame_capture.py and write_timing.py. Addresses are hex strings, inclusive.",
+  "_comment": "Bally/Sente SAC-I, from bally/balsente.cpp cpu1_base_map. The MC6809E main CPU's view. Addresses are hex strings, inclusive. The 6VB sound Z80 is a separate CPU (:audio6vb:audiocpu) reached by overriding CORE_CPU.",
   "cpu": ":maincpu",
   "space": "program",
-  "bus_bytes": 2,
+  "bus_bytes": 1,
   "big_endian": true,
   "read": {
-    "workram": [
-      "0x000000",
-      "0x00ffff"
-    ]
+    "spriteram": ["0x0000", "0x00ff"],
+    "workram":   ["0x0100", "0x07ff"],
+    "videoram":  ["0x0800", "0x7fff"],
+    "paletteram": ["0x8000", "0x8fff"]
   },
   "wtap": {
-    "vregs": [
-      "0x000000",
-      "0x00001f"
-    ]
+    "outlatch":   ["0x9800", "0x987f"],
+    "rombank":    ["0x98a0", "0x98bf"],
+    "palbank":    ["0x98c0", "0x98df"],
+    "rombank2":   ["0x9f00", "0x9f00"]
   },
-  "sweep": [
-    "workram",
-    "vregs"
-  ],
+  "sweep": ["spriteram", "videoram", "paletteram", "palbank", "rombank"],
   "trace": {
-    "addr_hi": "0xffffff",
-    "io": [
-      "0x000000",
-      "0x000000"
-    ],
-    "vectors": [
-      "0x000000",
-      "0x000000"
-    ],
+    "addr_hi": "0xffff",
+    "io": ["0x9000", "0x9fff"],
+    "vectors": ["0xfff0", "0xffff"],
     "ipl": {
-      "reg": "SR",
-      "shift": 8,
-      "mask": 7
+      "reg": "",
+      "shift": 0,
+      "mask": 0
     },
-    "rom": [
-      [
-        "0x000000",
-        "0x0fffff"
-      ]
-    ],
-    "ram": [
-      [
-        "0x100000",
-        "0x10ffff"
-      ]
-    ]
+    "rom": [["0xa000", "0xffff"]],
+    "ram": [["0x0000", "0x8fff"]]
   },
   "inputs": {
     "coin": "Coin 1",
     "start": "1 Player Start",
-    "hold": "P1 Right",
+    "hold": "P1 Left",
     "pulse": "P1 Button 1"
   }
 }
