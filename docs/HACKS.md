@@ -21,7 +21,8 @@ Rules:
 
 | What | Where | Why it is a hack | What would make it correct | Evidence | Severity |
 |---|---|---|---|---|---|
-| {{ONE_LINE_WHAT}} | `{{FILE}}:{{LINE}}` | {{WHY}} | {{FIX}} | {{EVIDENCE}} | {{SEVERITY}} |
+| 8253 implements modes 0 and 1 only, RW=11 binary | `rtl/sound/pit8253.sv` | The 6VB boot uses only control words 0x32, 0x70 and 0xB0; anything else asserts `unsupported` instead of being emulated | The remaining modes, the latch command and BCD counting | `sim/calib_tb` runs the whole self-calibration with `unsupported` never asserted; no game has been checked yet | latent |
+| Only the lowest CEM3394 chip-select bit is acted on | `rtl/sound/sente6vb_io.sv` (`sel_first`) | The boot routine only ever raises one at a time; if a game raises several the others are dropped | Latch the control voltage into every chip whose select rises, as `chip_select_w()` does | 29,799 boot writes, never more than one bit at a time | latent |
 
 <!-- Examples of the shape, from sibling cores:
 | Sound mailbox is a stub that answers the power-on test | `rtl/gx_snd_stub.sv` | No sound CPU yet; the stub returns the reply the test expects and a heartbeat | Phase 3: the real sound board | The game's RAM check passes with it; nothing else is exercised | visible |

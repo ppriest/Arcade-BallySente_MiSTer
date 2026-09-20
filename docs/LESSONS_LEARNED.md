@@ -44,6 +44,38 @@ repositories, and ask the user, who tracks the community lists. The same failure
 here, it wrongly said a whole core did not exist. Both cost the same thing -- a project scoped
 against a fiction.
 
+### [BallySente] A bus trace shows what the BOARD drove, not what the CPU latched
+
+The 6VB calibration read counter 1 as two bytes, the I/O trace recorded exactly the bytes MAME
+recorded in exactly MAME's order, every one of 1,112,116 program-space reads matched MAME, and
+the program still branched the other way. The peripheral drove its read data combinationally and
+the 8253's read pointer advances on each read, so the value on the bus CHANGED one cycle into the
+access -- and a Z80 samples its data bus at the END of an I/O cycle, two clock enables after the
+chip select. The CPU was taking the high byte for the low byte. The trace, which sampled at chip
+select, showed the right bytes in the right order throughout.
+
+Two rules fall out. **Latch a peripheral's read data at chip select and hold it**, so what the
+bus carries for the rest of the cycle cannot depend on state the access itself changed. And
+**log the latched value, not the combinational one**, or the trace will agree with the reference
+while the CPU disagrees -- which is the expensive failure, because every diff says the core is
+right. The signature to recognise: identical inputs on every visible bus and a conditional branch
+that goes the other way. That is not possible, so something the CPU consumed is not on the trace.
+
+### [BallySente] When MAME is the reference, transcribe MAME's device model, not the datasheet
+
+`rtl/sound/pit8253.sv` was written from the 8253 datasheet: a mode-1 one-shot loads and pulls OUT
+low when its gate rises, and counters advance on a rising clock. MAME's `pit8253.cpp` does neither.
+A counter advances on the FALLING edge of its clock input; GATE is sampled on the RISING edge; and
+a gate rise arriving between clock edges is *remembered* and applied at the next rising edge, so
+the one-shot arms one clock rising edge after the gate and pulls OUT low on the falling edge after
+that. The 6VB's self-calibration depends on exactly that ordering -- the flip-flop feeding counter
+0 is cleared and preset by register writes, and which of those writes produces an edge decides
+which oscillator period gets measured -- so the datasheet version stalled the loop on its first
+measurement and no amount of staring at the RTL would have said why. The file to read is the
+device in `src/devices/`, and the shape of its state machine (MAME's `m_phase` 0..3) is the thing
+to copy, comments and all. Corollary: peripheral behaviour a driver depends on is usually NOT in
+the driver.
+
 ### Suspect your own integration before any vendored module
 
 TG68K.C, T80, `sdram.sv`, MRA/ROM loading, `hps_io` and `sys_top` ship in many working cores. One
@@ -669,6 +701,33 @@ mirror passes a fill-then-verify test if a write tap shows nothing else writes t
 
 ## Testbench discipline
 
+- **[BallySente] When a bench's checker disagrees with the RTL, read what the program actually
+  programmed before assuming the RTL is wrong.** The 6VB calibration bench reported 44 of 66
+  measurements out of tolerance by thousands of counts. The RTL was right: partway through, the
+  routine loads counter 0 with 2 instead of 1, and then 4, 8 and 16 as the frequency rises, so the
+  window it measures is that many oscillator periods rather than one. The checker's predicted
+  value had the constant 1 baked in from an earlier analysis of the first pass only. The signature
+  that says "checker, not RTL": the error is a clean multiple of a quantity the checker already
+  knows, and it appears at a phase boundary rather than gradually. A second, smaller version of
+  the same mistake followed -- rounding one period and multiplying by the count, instead of
+  rounding the whole window, which is up to eight counts out when the period is 137 ticks.
+- **[BallySente] A state image restores architectural state, not a moment in time.** A bench can
+  skip a boot by loading RAM, replaying the I/O writes that preceded the image, and handing the
+  CPU a stub that loads its registers and jumps back in (`sim/common/state_image.sv`). What does
+  not come back: anything that depended on the interval between those writes -- a counter part way
+  through a count comes back wherever a fresh write leaves it. So take the image where the program
+  reprograms what it is about to use, and say in the bench which accesses were replayed, because a
+  trace comparison has to start at the image and not at reset.
+- **[BallySente] A vendored module's compile WARNING can be a latent fatal.** T80 has carried a
+  vcom-1275 "arguments of overloaded `and` are not the same length" warning through several
+  sibling cores, noted and ignored. It is a real bug: `T80.vhd:685` masks a 9-bit vector with a
+  4-bit literal in the P/V flag path for `INI`/`IND`/`OUTI`/`OUTD`, and ModelSim turns it into a
+  run-time abort (vsim-3424) the first time a block I/O instruction executes. Cores whose Z80
+  never runs one -- which is most of them -- see only the warning. The Bally/Sente 6VB sound
+  program does run them, and the boot died partway through, at a point that looked like the
+  program simply taking a long time. Triage a vendored module's compile warnings before a long
+  run, not after it fails; and when a simulation stops making progress, check for a fatal in the
+  log rather than assuming the model is just slow.
 - **Use `do @(posedge clk); while (signal);`, never `while (signal) @(posedge clk);`.** The latter
   races an `always_ff` updating the signal on the same edge and either deadlocks or returns before
   the transaction started. Recurred in three benches before being recognised as systemic.
@@ -1073,6 +1132,21 @@ ack address that is also an input port must acknowledge on writes only.
 
 ## Driving MAME as a reference generator (Lua)
 
+- **[BallySente] `device_state_entry` has no `name` in the Lua binding -- it is `symbol`.** A
+  dumper that walked `cpu.state` writing `e.name` produced a manifest with RAM, timestamps and
+  zero registers, and raised nothing: Lua returns nil for an absent property, the `if e.name`
+  guard was simply false every time, and the file looked merely short. Read the binding in
+  `src/frontend/mame/luaengine.cpp` (`state_entry_type[...]`) rather than the property names in
+  the docs, and have the writer COUNT what it emitted and fail on zero. Generalises: when a Lua
+  capture produces a well-formed file with a section missing, suspect a property name before
+  suspecting the machine.
+- **[BallySente] Take a state image from a frame notifier, never from a tap.** A memory or I/O
+  tap fires in the middle of a bus cycle, where the CPU's architectural state does not exist --
+  PC has moved past an opcode that has not finished. A machine frame notifier runs from the
+  scheduler between timeslices, where every CPU sits on an instruction boundary; the check is
+  that `PC` and `CURPC` agree there. So a tap may only ARM the dump, and the image lands up to
+  one frame later than its trigger. Anything counted for alignment has to be counted at the
+  image, not at the trigger.
 - **[BallySente] A sound reference captured without starting the game is the SOUND BOARD's boot
   routine, not the game's.** Four Bally/Sente cartridges were captured for 10 s each and replayed
   against the model, and all four produced identical numbers to four significant figures. That

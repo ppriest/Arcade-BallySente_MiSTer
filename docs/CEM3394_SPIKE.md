@@ -334,16 +334,80 @@ flip-flop and the I/O decode are not written yet, and until they are, criterion 
 is *predicted to pass with the mechanism quantified*, not met. What is no longer needed is a
 guess — the bench to build is now fully specified, and its expected output is a formula.
 
+## Result 7: the loop runs and converges, and follows MAME's own search
+
+`rtl/sound/pit8253.sv` and `rtl/sound/sente6vb_io.sv` are written, and `sim/calib_tb` runs T80
+out of the real 8 KB ROM against them, with the flip-flop clocked by the periodic timer
+`update_counter_0_timer()` describes at the frequency the model gives for the written control
+voltage.
+
+**It converges, and it takes MAME's path.** The first eight measurements, with the control
+voltage MAME's binary search chooses at each step:
+
+| # | VCO CV | f | predicted | read | MAME read |
+|---|---|---|---|---|---|
+| 1 | −0.002 | 432.674 Hz | 60912 | 60914 | 60913 |
+| 2 | +0.998 | 171.707 Hz | 53887 | 53888 | 53888 |
+| 3 | +1.248 | 136.284 Hz | 50859 | 50860 | 50860 |
+| 4 | +1.279 | 132.404 Hz | 50429 | 50431 | 50431 |
+| 5 | +1.295 | 130.506 Hz | 50210 | 50211 | 50211 |
+| 6 | +1.287 | 131.452 Hz | 50320 | 50321 | 50321 |
+| 7 | +1.291 | 130.978 Hz | 50265 | 50266 | 50266 |
+| 8 | +1.293 | 130.742 Hz | 50237 | 50238 | 50238 |
+
+The prediction Result 6 gives needed one correction to survive the whole routine. It is not one
+oscillator period: counter 0 is a **mode-1 one-shot loaded with a count that rises as the search
+climbs** -- 1 at the bottom of the range, then 2, 4, 8 and 16 -- so the window is that many
+periods, and the count has to be rounded over the whole window rather than per period:
+
+> `counter1 = 0xFFFF - round(count0 * 2e6 / f)`
+
+Three defects were found and fixed getting here, in increasing order of how long they took.
+
+**1. The 8253 was written from the datasheet.** MAME's `pit8253.cpp` advances a counter on the
+**falling** edge of its clock input, samples GATE on the **rising** edge, and *remembers* a gate
+rise that arrives between clock edges until the next rising edge. So a mode-1 one-shot does not
+start when its gate rises: it arms one clock rising edge later and pulls OUT low on the falling
+edge after that. The calibration depends on exactly that, because the flip-flop feeding counter 0
+is cleared and preset by register writes and which of those writes produces an edge decides which
+period gets measured. Written from the datasheet, counter 0 never triggered and the loop stalled
+on its first measurement.
+
+**2. The flip-flop's clock is a periodic timer, not an oscillator.** Each firing passes the
+control register's D bit through the flip-flop, so a constant D gives no edges at all; the timer
+is armed when counter 0's gate rises and only if it was not already running, restarted from zero
+by every `chip_select_w()`, and cancelled when the gate falls. All of that is now in the bench and
+in `MAME_KLUDGES.md`.
+
+**3. The board drove its read data combinationally.** This one survived a full bus-trace diff.
+With the first two fixed, all 1,112,116 program-space reads matched MAME byte for byte, every
+write matched (bar the order of the two halves of `EX (SP),IX`, which T80 interleaves and MAME
+does not), the I/O trace recorded the same bytes in the same order -- and at the `JP M` that
+compares the measurement against its target, MAME fell through and the RTL jumped. An isolated
+bench, `sim/t80_alu_tb`, ran the same `SBC HL,DE` sequence on T80 with those operands and got the
+right answer, which ruled out the CPU and left only the operands. The 8253's read pointer advances
+on each read, so a combinational read value *changes one cycle into the access*, and a Z80 samples
+its data bus at the END of an I/O cycle -- the CPU was taking counter 1's high byte for its low
+byte, while the trace, sampled at chip select, showed the right bytes in the right order.
+`sente6vb_io` now latches its read data at chip select and holds it, and the bench logs the
+latched value.
+
+**What the remaining difference is.** Measurement 1 reads 60914 where MAME reads 60913 -- one
+tick of the 2 MHz counter. The window is 4622.2 ticks and the two sides round it differently
+depending on where the flip-flop fires against the 2 MHz grid; MAME is not self-consistent about
+it either, reading 60913 and 60914 at the same control voltage on different voices. It is inside
+the tolerance Result 6 measured, and the search takes the same path through it.
+
 ## What is not done
 
-- **Nothing in RTL.** The model is the specification the RTL will be written against; the RTL is
-  then checked against the model, per WORKFLOW section 9.
 - **Only one game has been replayed in-game.** `snakepit` was captured with a coin too but is
   silent over the window compared, so the in-game column above is Chicken Shift alone. Pick
   windows with audio in `snakepit`, `gimeabrk` and `nametune` before treating Result 3 as
   covering high resonance, heavy noise mixing and filter FM.
-- **The calibration loop.** Half 2 of the criterion. Needs the sound Z80, the 8253 and the
-  serial link.
-- **The VCO datapath is still float in the fixed-point mode.** It is an accumulator plus
-  polynomial corrections and cannot go unstable, but its quantisation will set the waveform
-  noise floor and has not been measured.
+- **The control-voltage to frequency map is still evaluated in the bench, in real arithmetic.**
+  `sim/calib_tb` proves the loop closes given a correct map; in the core the map becomes a lookup
+  table feeding `cem3394_vco`'s `step`, and that table is not written.
+- **The six-voice cycle budget.** One shared pipeline does not close at 40 MHz (522 cycles
+  against 417). Two pipelines, or an audio clock of 50 MHz or more. A Phase 3 decision.
+- **The 8253 implements modes 0 and 1 only**, RW=11 binary, and asserts `unsupported` on anything
+  else. That is all the boot routine uses; a game that needs more is a `HACKS.md` entry.

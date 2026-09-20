@@ -426,6 +426,7 @@ each **done** as it lands.
 | `mame_capture.py` + `mame/*.lua`, `write_timing.py` | headless MAME reference capture; video-write sweep | skill |
 | `render_model.py` | the software model of the driver's video file | GX, MS32 (pattern only) |
 | `mame_boot_trace.py`, `mame_sys_trace.py`, `compare_boot_trace.py` | the CPU trace diff against MAME | skill |
+| `mame_dump_state.py` + `mame/dumpstate.lua`, `sim/common/state_image.sv` | a state image from MAME — registers, RAM and the preceding I/O writes — so a bench starts where MAME was instead of booting to get there | BallySente |
 | `diff_core_trace.py` | RTL-side trace diff | Seta |
 | `decode_gfx.py`, `gfx_sheet.py` | decode tiles straight from the ROM zip | Seta, Fuuki |
 | `memdump.py` | read any CPU-visible memory out of a running core | Seta, Fuuki |

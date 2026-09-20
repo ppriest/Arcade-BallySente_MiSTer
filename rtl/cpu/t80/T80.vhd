@@ -682,7 +682,18 @@ begin
 						F(Flag_N) <= DI_Reg(7);
 						F(Flag_C) <= ioq(8);
 						F(Flag_H) <= ioq(8);
-						ioq := (ioq and x"7") xor ('0'&BusA);
+						-- CHANGED IN THIS REPOSITORY (Arcade-BallySente_MiSTer).
+						-- Upstream has `ioq and x"7"`. ioq is 9 bits and x"7" is
+						-- 4, which IEEE std_logic_1164 does not allow: ModelSim
+						-- warns at compile (vcom-1275) and aborts at run time
+						-- (vsim-3424) the moment a block I/O instruction
+						-- executes. The Bally/Sente 6VB sound program uses them,
+						-- so the boot dies partway through.
+						-- The mask is meant to keep the low three bits, per the
+						-- Z80's INI/IND/OUTI/OUTD P/V flag rule, so the constant
+						-- is widened rather than the vector narrowed.
+						-- Still present upstream at 830fd0315f0a.
+						ioq := (ioq and "000000111") xor ('0'&BusA);
 						F(Flag_P) <= not (ioq(0) xor ioq(1) xor ioq(2) xor ioq(3) xor ioq(4) xor ioq(5) xor ioq(6) xor ioq(7));
 					end if;
 

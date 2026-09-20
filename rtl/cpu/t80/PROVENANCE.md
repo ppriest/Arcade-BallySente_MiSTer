@@ -62,6 +62,32 @@ Not investigated further since the actual simulation result is what matters and 
 before the hang -- worth remembering if a future VHDL-only testbench run appears to hang: check
 whether it already printed PASS/FAIL before assuming something is actually stuck.
 
+## Local change: an upstream bug in the block I/O flags
+
+**`T80.vhd` is no longer byte-identical to upstream.** One line is changed, marked in place with
+the reason, and `T80_upstream_reference.vhd` holds the pristine copy so the diff stays checkable.
+
+`T80.vhd:685` reads, upstream:
+
+    ioq := (ioq and x"7") xor ('0'&BusA);
+
+`ioq` is 9 bits (`std_logic_vector(8 downto 0)`, line 386) and `x"7"` is 4. IEEE
+`std_logic_1164`'s `and` requires equal lengths: ModelSim warns at compile time (vcom-1275) and
+**aborts at run time** (vsim-3424) the instant the line executes. It executes on `INI`, `IND`,
+`OUTI` and `OUTD` — the Z80's block I/O instructions — which the Bally/Sente 6VB sound program
+uses, so the boot dies partway through and the machine never reaches its self-calibration.
+
+Changed to `(ioq and "000000111")`: the mask is meant to keep the low three bits, per the Z80's
+P/V flag rule for those instructions, so the constant is widened rather than the vector
+narrowed.
+
+**Still present upstream** in MiSTer-devel/T80 at `830fd0315f0a` — the same commit vendored here
+— so this is not a porting artefact. It is invisible to any core whose Z80 never executes block
+I/O, which is why the sibling cores carry the compile warning without ever tripping over it.
+
+The regression that guards the change: `sim/sound_cpu_tb` still matches MAME on all 60,000 bus
+accesses after it, and the vcom-1275 warning is gone.
+
 ## Status in this core
 
 Nothing below has been run here yet. Fuuki's and Psikyo's evidence above is why this module is
@@ -89,3 +115,18 @@ drives. The Z80 has no equivalent: every cycle it runs is a real access.
 
 The boot window needs no replayed reads at all -- the 6VB never touches its ACIA in the first
 60,000 accesses -- so the comparison rests entirely on the CPU and the ROM.
+
+Extended since, to the whole boot and into the self-calibration:
+
+> **1,200,000 bus accesses. All 1,112,116 reads identical to MAME. All 84,740 writes identical
+> in address and data**, and identical in order except for the two halves of `EX (SP),IX`
+> (`DD E3`), where MAME reads both bytes before writing either and T80 interleaves
+> read/write/read/write. Same accesses, same data, different order within the one instruction,
+> nothing else on the bus during it -- recorded in `docs/MAME_KLUDGES.md` alongside `mc6809i`'s
+> dead-cycle divergence rather than "fixed".
+
+`sim/t80_alu_tb` was added while chasing a divergence that turned out not to be T80's: it runs
+the `SBC HL,DE` sequence the calibration compares with, prints the result and every flag, and
+checks the sign against the result's bit 15. Kept as a regression, and as the shape to copy when
+an instruction's flags are next in question -- an isolated bench answered in seconds what a
+1.2-million-line trace diff could only point at.
