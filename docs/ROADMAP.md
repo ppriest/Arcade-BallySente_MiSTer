@@ -48,7 +48,7 @@ bind decisions here are collected under "Pitfalls that already bind decisions he
 
 ## Progress
 
-**Phase 0 in progress: 2 of 5 exit criteria met, including the CPU bus-trace gate.**
+**Phase 0 in progress: 2 of 5 exit criteria met, 1 half met. The gate's stability question is answered.**
 
 | # | Criterion | State |
 |---|---|---|
@@ -56,7 +56,7 @@ bind decisions here are collected under "Pitfalls that already bind decisions he
 | 2 | The CPU boots the first target and matches MAME's bus trace | **Met.** 400,000 bus cycles of `sentetst` from reset; all 52,232 writes identical in address, lanes, data and order. 12,171 cycles (3.04%) differ and every one is a non-VMA or prefetch address choice — zero functional differences, recorded in `docs/MAME_KLUDGES.md`. Evidence: `scripts/compare_boot_trace.py compare sentetst`, `scripts/classify_trace_diff.py sentetst`, `debug/sentetst-boot/classify.txt`. |
 | 3 | Measured CPI on real game code | **Met.** 4.207 bus cycles per opcode fetch over those 400,000 cycles; 22.5% of cycles are dead ($FFFF). Memory stall is zero by construction in this bench — every answer is same-cycle — so the split is 100% execution. SDRAM stalls are a Phase 2 measurement. |
 | 4 | Standalone Fmax and area for the CPU | **Open.** Not yet run. |
-| 5 | A CEM3394 voice reproduces MAME's model, and the 6VB calibration loop converges against it | **Open.** The model has been read and characterised (see the note above); nothing built. |
+| 5 | A CEM3394 voice reproduces MAME's model, and the 6VB calibration loop converges against it | **Half met.** The software model is written and ported line by line from MAME (`scripts/cem3394_model.py`); the CV laws reproduce the datasheet to 7×10⁻⁷ and pitch through the whole chain tracks to 10⁻⁴ at every frequency the board calibrates at. Fixed point is stable at all 60 operating points in every format from 22 to 34 bits, including past the self-oscillation threshold — the word width buys noise floor only. Full evidence and the format choice in [`CEM3394_SPIKE.md`](CEM3394_SPIKE.md). The model is also anchored to MAME's own audio: driven by MAME's control writes it matches level to +0.00 dB and per-octave energy to 0.01 dB worst case, against a control (MAME vs a later slice of itself) of 1.28 dB. **Still open:** no RTL yet, only one game replayed, and the calibration loop needs the Z80, the 8253 and the serial link. |
 
 Research is complete: `docs/HARDWARE_NOTES.md` is written from `bally/balsente.cpp` (3064 lines),
 `balsente_m.cpp`, `balsente_v.cpp`, `sente6vb.cpp`, `devices/sound/cem3394.cpp` and the `va_*`
@@ -449,8 +449,12 @@ running it in MAME and looking.
    testbench to run, which `rtl/cpu/mc6809/PROVENANCE.md` records.
 3. ~~Phase 0: build the MAME trace harness for `sentetst`.~~ Done for `:maincpu`; criteria 2 and 3
    met. The `:audio6vb:audiocpu` side is still to do.
-4. Phase 0: the CEM3394 voice spike and the calibration-loop bench — **the gate**. Port `va_vco`,
-   `va_lpf4`, `va_vca` and the CV mappings to a software model first, check it against MAME's
-   output, then the RTL against the model.
-5. Phase 0: standalone Fmax and area for `mc6809i` at this project's settings (criterion 4).
-6. Fill `THIRD-PARTY.md` from the reuse map, with each dependency's licence text located.
+4. ~~Phase 0: port the CEM3394 chain to a software model.~~ Done; the fixed-point
+   stability question is answered ([`CEM3394_SPIKE.md`](CEM3394_SPIKE.md)).
+5. ~~Phase 0: check the model against MAME's own audio.~~ Done for `cshift`: level +0.00 dB,
+   worst octave 0.01 dB, against a 1.28 dB control. Repeat for `snakepit`, `gimeabrk` and
+   `nametune` to cover high resonance, noise mixing and filter FM.
+6. Phase 0: the CEM3394 voice in RTL, checked against the model; then the calibration-loop
+   bench, which needs the sound Z80 and the 8253 — **the rest of the gate**.
+7. Phase 0: standalone Fmax and area for `mc6809i` at this project's settings (criterion 4).
+8. Fill `THIRD-PARTY.md` from the reuse map, with each dependency's licence text located.
