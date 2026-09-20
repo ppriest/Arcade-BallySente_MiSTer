@@ -1,7 +1,6 @@
 # Bally/Sente SAC-I — MiSTer Core Roadmap
 
-**This roadmap is a proposal until the user approves it. No phase executes before that approval,
-and a phase whose scope changes goes back for approval.**
+**Approved. A phase whose scope changes goes back for approval.**
 
 ## Context
 
@@ -14,14 +13,24 @@ they exist.
 whole risk.** The SAC-I motherboard is 1984 TTL around a 1.25 MHz 6809 — no custom ASICs, no
 tilemap chip, no protection MCU, a 408 KB worst-case ROM set. Against that, the 6VB audio board
 carries six **CEM3394** chips: complete analog synthesiser voices driven by control voltages from
-a 12-bit DAC, with no digital register interface, no FPGA precedent anywhere, and a MAME model
-the driver itself calls inaccurate.
+a 12-bit DAC, with no digital register interface and no FPGA precedent anywhere.
+
+> **Revised after reading the model** (see `HARDWARE_NOTES.md`, "What MAME's model actually is").
+> This roadmap was drafted on the driver's "CEM3394 emulation is not perfect" note. That note was
+> last touched 2026-05-24; MAME rebuilt the device onto its virtual-analog primitives
+> (`va_vco`, `va_lpf4`, `va_vca`, `filter_rc`) afterwards, in June and July 2026. The reference is
+> a structured, portable signal chain — a polyBLEP oscillator into a Zavalishin TPT ladder filter
+> into an RC high-pass into a VCA — costing roughly 20 multiplies per voice per sample, about
+> 12 M multiplies/s for all six at 96 kHz. **The arithmetic is comfortable and the specification
+> is good.** The risk is narrower than stated below: whether a fixed-point port stays stable at
+> high resonance and converges the board's own calibration loop. Phase 0 criterion 5 is unchanged
+> and still the gate; it is now a more likely pass.
 
 Genuinely new work, in order of risk:
 
 1. **Six CEM3394 voices** — VCO (tri/saw/pulse + PWM), mixer with external noise input, resonant
-   4-pole VCF, VCA, all controlled by eight exponential-law control voltages per chip. Written
-   from MAME's numerical model. No ground truth to diff against.
+   4-pole VCF, VCA, all controlled by eight exponential-law control voltages per chip. Ported from
+   MAME's virtual-analog chain; no silicon ground truth, but a structured reference.
 2. **The 6VB self-calibration loop** — the sound program measures a voice's oscillator through
    8253 counter 0. It must work against the RTL voice, not against a faked frequency.
 3. **Video** — a 256×240 4bpp packed bitmap the CPU draws into, plus a 40-entry sprite overlay
@@ -39,10 +48,24 @@ bind decisions here are collected under "Pitfalls that already bind decisions he
 
 ## Progress
 
-**Research complete; nothing built.** `docs/HARDWARE_NOTES.md` is written from
-`bally/balsente.cpp` (3064 lines), `balsente_m.cpp`, `balsente_v.cpp`, `sente6vb.cpp` and
-`devices/sound/cem3394.cpp` at MAME commit `5ae594ba`. 41 sets enumerated, 39 in scope. The
-reuse survey below located an RTL source for every digital part and none for the CEM3394.
+**Phase 0 in progress: 2 of 5 exit criteria met, including the CPU bus-trace gate.**
+
+| # | Criterion | State |
+|---|---|---|
+| 1 | Vendored modules pass their own tests on arrival | **Open.** `mc6809i` upstream ships no testbench at all (`rtl/cpu/mc6809/PROVENANCE.md` says what replaces it); T80 arrives with Fuuki's and Psikyo's evidence but has not been compiled here. |
+| 2 | The CPU boots the first target and matches MAME's bus trace | **Met.** 400,000 bus cycles of `sentetst` from reset; all 52,232 writes identical in address, lanes, data and order. 12,171 cycles (3.04%) differ and every one is a non-VMA or prefetch address choice — zero functional differences, recorded in `docs/MAME_KLUDGES.md`. Evidence: `scripts/compare_boot_trace.py compare sentetst`, `scripts/classify_trace_diff.py sentetst`, `debug/sentetst-boot/classify.txt`. |
+| 3 | Measured CPI on real game code | **Met.** 4.207 bus cycles per opcode fetch over those 400,000 cycles; 22.5% of cycles are dead ($FFFF). Memory stall is zero by construction in this bench — every answer is same-cycle — so the split is 100% execution. SDRAM stalls are a Phase 2 measurement. |
+| 4 | Standalone Fmax and area for the CPU | **Open.** Not yet run. |
+| 5 | A CEM3394 voice reproduces MAME's model, and the 6VB calibration loop converges against it | **Open.** The model has been read and characterised (see the note above); nothing built. |
+
+Research is complete: `docs/HARDWARE_NOTES.md` is written from `bally/balsente.cpp` (3064 lines),
+`balsente_m.cpp`, `balsente_v.cpp`, `sente6vb.cpp`, `devices/sound/cem3394.cpp` and the `va_*`
+primitives at MAME commit `5ae594ba`. 41 sets enumerated, 39 in scope. The reuse survey below
+located an RTL source for every digital part and none for the CEM3394.
+
+Incidental result worth keeping: `sentetst` is an even better first target than expected — its
+whole program is one 8 KB ROM in the fixed EF window (`ROM_START` loads a single file at
+0x1e000), so booting it exercises no cartridge banking at all.
 
 ## Game scope
 
@@ -421,8 +444,13 @@ running it in MAME and looking.
 
 ## Next steps
 
-1. **Approval of this roadmap.** Nothing below starts before that.
-2. Fill `THIRD-PARTY.md` from the reuse map, with each dependency's licence text located.
-3. Phase 0: vendor `mc6809i.v` and T80 with `PROVENANCE.md`, run their own testbenches.
-4. Phase 0: build the MAME trace harness for `sentetst` (`:maincpu` and `:audio6vb:audiocpu`).
-5. Phase 0: the CEM3394 voice spike and the calibration-loop bench — the gate.
+1. ~~Approval of this roadmap.~~ Given.
+2. ~~Phase 0: vendor `mc6809i.v` and T80 with `PROVENANCE.md`.~~ Done; `mc6809i` has no upstream
+   testbench to run, which `rtl/cpu/mc6809/PROVENANCE.md` records.
+3. ~~Phase 0: build the MAME trace harness for `sentetst`.~~ Done for `:maincpu`; criteria 2 and 3
+   met. The `:audio6vb:audiocpu` side is still to do.
+4. Phase 0: the CEM3394 voice spike and the calibration-loop bench — **the gate**. Port `va_vco`,
+   `va_lpf4`, `va_vca` and the CV mappings to a software model first, check it against MAME's
+   output, then the RTL against the model.
+5. Phase 0: standalone Fmax and area for `mc6809i` at this project's settings (criterion 4).
+6. Fill `THIRD-PARTY.md` from the reuse map, with each dependency's licence text located.

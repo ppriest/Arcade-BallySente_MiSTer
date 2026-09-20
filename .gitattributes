@@ -1,0 +1,4 @@
+# Vendored directories are stored byte-for-byte: "verbatim at <commit>" has to stay
+# checkable, and `git log -p` on the directory is the record of every local divergence.
+rtl/cpu/mc6809/** -text
+rtl/cpu/t80/** -text

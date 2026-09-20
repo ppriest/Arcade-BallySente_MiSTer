@@ -17,29 +17,67 @@ synthesizer voices (VCO with triangle/saw/pulse and PWM, a mixer with external i
 resonant VCF, a VCA), each controlled by eight analog control voltages written from a 12-bit
 DAC. There is no digital register interface to reimplement: the sound program sets voltages.
 
-Consequences:
+### What MAME's model actually is
 
-1. There is no reference implementation to port. MAME models it numerically in
-   `devices/sound/cem3394.cpp`, from the datasheet transfer functions
-   (`f = exp(V) * 431.894`, −0.75 V/octave for the VCO; −0.375 V/octave and 1300 Hz at 0 V
-   for the filter; −20 dB/V for gain and mixer balance). That model is the specification an
-   RTL voice would be written against.
-2. **MAME's own model is not accurate** — the driver's "Known bugs" lists "CEM3394 emulation
-   is not perfect". So a bit-exact audio comparison against MAME is not a valid exit
-   criterion. Audio verification has to be structural (does the voice produce the right
-   waveform, pitch and envelope for a given control voltage) plus listening against PCB
-   recordings.
-3. The board calibrates itself. The sound Z80 routes a voice's oscillator into 8253 counter 0
-   and measures it. MAME fakes this by feeding the counter the frequency its own model
-   computed (`update_counter_0_timer()`). In RTL the digital oscillator can drive the counter
-   for real, so the calibration loop works as it does on the PCB — **this is a place where the
-   RTL is more faithful than MAME, not less**, and it is also a hard functional test: if the
-   voice's pitch mapping is wrong, calibration fails and the game hangs or plays out of tune.
+**MAME rewrote this device onto its virtual-analog primitives, and the driver's "not perfect"
+note predates that work.** `devices/sound/cem3394.cpp` no longer computes waveforms itself: it
+wires up `va_vco`, `va_lpf4`, `va_vca` and `filter_rc` and maps the eight control voltages onto
+their parameters. The rewrite landed in a series of commits — `c21edf7fc9a` (self-oscillation),
+`f0fa6f910de` (va_vcf), `a021da1579e` (pulse width), `7d6c16dbdac` (va_vco), `e47154a36e5`,
+`4515e9a34eb` — with `va_vcf.cpp` last changed 2026-07-04 and `va_vco.cpp` 2026-06-28. The
+"CEM3394 emulation is not perfect" line in `balsente.cpp` was last touched **2026-05-24**
+(`git log -S`), before any of it.
 
-Cost estimate: six voices at a 48 kHz-class sample rate is one time-multiplexed DSP pipeline
-(NCO phase accumulator, waveform generator, 4-pole filter, VCA) plus exponential V→frequency
-lookup tables. That is comparable to the YMF278B and X1-010 written from scratch in the Psikyo
-and Seta cores, with the difference that there is no digital ground truth to diff against.
+The signal chain, as built in `device_add_mconfig()`:
+
+```
+  va_vco ramp  --+
+  va_vco pulse --+
+  va_vco tri   --+---> va_lpf4 ---> filter_rc ---> va_vca ---> out
+  mm5837 noise --+     (4-pole)     (highpass)   (final gain)
+   (mixer gains)         ^
+                         |
+  va_vco tri --> va_vca(filt_fm) --+   filter FM, gain = mod_amount * 0.5
+```
+
+- **`va_lpf4`** is a Zavalishin TPT ("zero-delay feedback") Moog ladder: four one-pole stages,
+  a resonance feedback path with `tanh` saturation, low-frequency gain compensation, coefficients
+  `g = tan(w·T/2)` recomputed only when the cutoff changes. Roughly a dozen multiplies per sample.
+- **`va_vco`** is a polyBLEP/polyBLAMP anti-aliased oscillator producing ramp, pulse and triangle
+  from one phase accumulator, with hard sync available but **not used here** (`SYNC_TYPE_NONE`),
+  which removes most of its complexity.
+- **`filter_rc`** high-pass, R = 11 kΩ internal, C = `c_ac` = 10 µF.
+- The VCF runs at `max(96 kHz, sample_rate)` to keep the saturator's distortion products out of
+  the audible band.
+
+That is a precise, portable specification — not the situation the roadmap was written against.
+
+Consequences, revised:
+
+1. **There is still nothing to port.** No FPGA implementation of this chip, or of the only other
+   machine MAME gives it to (`sequential/sixtrak.cpp`, the Sequential Circuits Six-Trak), exists.
+   The work is writing it.
+2. **But the specification is now a good one.** A structured virtual-analog chain of four named
+   primitives is a far better thing to port than a bag of numerical approximations, and each
+   primitive can be ported and checked on its own before they are chained.
+3. **MAME is a usable reference again, with a caveat.** The driver's blanket "not perfect" is
+   stale, but MAME's chain is still a model of an analog part, not the part. Agreement with MAME
+   remains the bar for Phase 3; agreement with a PCB is Phase 5 and needs recordings nobody has
+   captured yet.
+4. **The board calibrates itself**, and that is the real test. The sound Z80 routes a voice's
+   oscillator into 8253 counter 0 and measures it. MAME fakes this by feeding the counter the
+   frequency its own model computed (`update_counter_0_timer()`). In RTL the digital oscillator
+   drives the counter for real, so the calibration loop works as it does on the PCB — **the RTL
+   is more faithful than MAME here**, and if the voice's pitch mapping is wrong the loop fails
+   loudly instead of sounding slightly off.
+
+Cost estimate, from the structure above: roughly 20 multiplies per voice per sample. Six voices
+at 96 kHz is 576 k samples/s, so about 12 M multiplies/s against a 40 MHz clock — comfortably one
+time-multiplexed DSP pipeline. The expensive operations (`tan`, `tanh`, the CV exponentials, the
+`1/(1+res·G4)` divide) are either lookup tables or run only when a control voltage changes, which
+is at CPU-write rate. **The arithmetic is not the problem.** What remains genuinely open is
+whether a fixed-point port of this chain stays stable at high resonance and converges the board's
+calibration loop — which is what the Phase 0 spike measures.
 
 Everything else on the board is conventional 1984 TTL and well within scope.
 
