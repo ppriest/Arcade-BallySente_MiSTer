@@ -31,6 +31,19 @@ not exist in a new repository.
 
 ## Diagnosis discipline
 
+### [BallySente] GitHub's repository search does not find MiSTer cores; enumerate instead
+
+Choosing a target began with `gh search repos` for board names, which reported no core for
+Taito F3 or Taito B. Both exist (spacestate1/Arcade-taitoF3_MiSTer, Mezzow/Arcade-TaitoB_MiSTer)
+and the user supplied them. That search matches repository *names and descriptions* only, with
+multi-word queries ANDed, so a core named for the board but described in other words is invisible;
+it also never reaches a fork or a personal repository with a thin description. What does work:
+list the MiSTer-devel org (`gh api --paginate orgs/MiSTer-devel/repos`), list jotego's
+repositories, and ask the user, who tracks the community lists. The same failure mode as the
+[MS32] entry below, on the other side: there, a name search wrongly said a CPU did not exist;
+here, it wrongly said a whole core did not exist. Both cost the same thing -- a project scoped
+against a fiction.
+
 ### Suspect your own integration before any vendored module
 
 TG68K.C, T80, `sdram.sv`, MRA/ROM loading, `hps_io` and `sys_top` ship in many working cores. One
