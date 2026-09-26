@@ -327,7 +327,8 @@ Generate every `.mra` from a script (`scripts/build_mra.py`), not by hand:
   `ROM_START` (`scripts/mra.py` reimplements mra-tools-c's semantics).
 - SDRAM offsets come from the RTL's own address map (its localparams), never duplicated into the
   generator.
-- Parents land in `releases/`, clones in `releases/_alternatives/`.
+- Parents land in `releases/`, clones in `releases/_alternatives/_<parent>/` (the parent's title
+  without its parenthesised qualifiers).
 - Every `.mra` is gated on an **XML well-formedness check** before deploy. A stray `<` inside a
   prematurely-closed comment gives a black screen whose every symptom points at the RTL.
 - A `<dip>`'s `bits` attribute is a **range**, `"first,last"` — `Main_MiSTer` reads it with

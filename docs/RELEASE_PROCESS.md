@@ -37,7 +37,7 @@ Steps for a release:
    every open licence question is answered or that code is out of the build.
 5. Publish the `.rbf` and the whole `.mra` set together under `releases/`. They are coupled — the
    SDRAM layout and the ROM-load path are both encoded in the MRAs, so a mismatched pair fails in
-   ways that look like core bugs. Parents at the top level, clones in `releases/_alternatives/`.
+   ways that look like core bugs. Parents at the top level, clones in `releases/_alternatives/_<parent>/`.
    The `.rbf` is `Arcade-<Name>_YYYYMMDD.rbf`; `releases/*.rbf` is gitignored, so add it with
    `git add -f` deliberately, and only a build verified to run the games.
 6. Record the commit **and the fitter seed** from `build/BUILT_COMMIT` in the release notes, with

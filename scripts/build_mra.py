@@ -135,8 +135,14 @@ CACHE = REPO / "debug" / "mame"
 
 
 def out_dir(game, parent):
-    """Parents in releases/, clones in releases/_alternatives/."""
-    return OUT / "_alternatives" if parent else OUT
+    """Parents in releases/, clones in releases/_alternatives/_<parent>/, as
+    the MRA documentation and MRA-Alternatives lay them out; the folder is the
+    parent's title without its parenthesised qualifiers ("Mini Golf (set 1)"
+    -> `_Mini Golf`), as the Fuuki core names it."""
+    if not parent:
+        return OUT
+    base = game_line(driver_text(), parent)["title"].split(" (")[0]
+    return OUT / "_alternatives" / ("_" + fname(base)[:-4])
 
 
 # ----------------------------------------------------------------- MAME

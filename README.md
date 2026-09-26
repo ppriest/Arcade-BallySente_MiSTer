@@ -41,7 +41,7 @@ hardware and in scope. All ROMs are held in block RAM, so no SDRAM module is nee
 
 ### Supported
 
-Sets with an `.mra` in `releases/` (clones in `releases/_alternatives/`). Chicken Shift and Snacks'n Jaxson run well enough. Others have not been tried much yet though many appear to play okay.
+Sets with an `.mra` in `releases/` (clones in `releases/_alternatives/_<parent>/`). Chicken Shift and Snacks'n Jaxson run well enough. Others have not been tried much yet though many appear to play okay.
 
 | Name | Year | Manufacturer | Controls | Notes |
 |-|-|-|-|-|
@@ -199,7 +199,7 @@ Copy `releases/Arcade-BallySente_20260927.rbf` to `_Arcade/cores` and `releases/
 `_alternatives/`) to `_Arcade/_BallySente`. To run a development build instead:
 `python scripts/build_staged.py`, then `python scripts/deploy.py` with a `mister.env` (see
 `scripts/deploy.py`). That copies the core to `_Arcade/cores` and the `.mra` files to
-`_Arcade/_BallySente`, clones in `_alternatives/` beneath it.
+`_Arcade/_BallySente`, clones in `_alternatives/_<parent>/` beneath it.
 
 * Put the MAME merged or split ROM sets in `games/mame`, and `sente6vb.zip` beside them: the 6VB
   sound board's ROM is a device ROM every set needs
@@ -325,7 +325,7 @@ Standard [Template_MiSTer](https://github.com/MiSTer-devel/Template_MiSTer) stru
 | - | - |
 | `sys` | MiSTer framework, vendored from the template, never edited |
 | `rtl` | core source; vendored modules carry a `PROVENANCE.md` |
-| `releases` | `.rbf` and `.mra` files; clones in `_alternatives` |
+| `releases` | `.rbf` and `.mra` files; clones in `_alternatives/_<parent>` |
 | `docs` | roadmap, workflow, release process, kludges, hacks, lessons |
 | `sim` | ModelSim and Verilator testbenches |
 | `scripts` | build, deploy, capture and verification tooling |
