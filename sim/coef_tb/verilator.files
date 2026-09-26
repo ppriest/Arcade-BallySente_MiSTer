@@ -1,0 +1,3 @@
++incdir+rtl/sound
+rtl/sound/cem3394_coef.sv
+sim/coef_tb/tb_coef.sv

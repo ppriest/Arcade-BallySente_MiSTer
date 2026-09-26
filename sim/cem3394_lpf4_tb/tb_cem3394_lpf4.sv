@@ -46,7 +46,7 @@ module tb_cem3394_lpf4;
         .DW_INT(DW_INT), .DW_FRAC(DW_FRAC), .CW_INT(CW_INT), .CW_FRAC(CW_FRAC),
         .TANH_LOG2N(10), .TANH_FILE("debug/cem3394/tanh_table.hex")
     ) dut (
-        .clk(clk), .rst_n(rst_n),
+        .clk(clk), .rst_n(rst_n), .voice(3'd0),
         .alpha(alpha), .beta0(beta0), .beta1(beta1), .beta2(beta2), .beta3(beta3),
         .alpha0(alpha0), .res(res), .gain_comp(gain_comp),
         .in_valid(in_valid), .in_sample(in_sample),

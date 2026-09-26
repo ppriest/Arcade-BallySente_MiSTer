@@ -28,16 +28,34 @@
 // The palette is read 32 bits at a time, one entry a read: four bytes, big
 // endian on this board's 6809 bus, R in byte 0, G in byte 1, B in byte 2 and
 // byte 3 unused. Reading it as bytes would need three reads a pixel.
+//
+// FLIP SCREEN. The board has none; this is the core's, for the OSD and the
+// .mra's fake DIP. Displayed pixel (x, row) shows stored pixel (255 - x,
+// 239 - row): video RAM and the sprite line buffer are read mirrored, and the
+// sprite engine draws the mirrored line. The palette bank is the one part the
+// program changes by beam time, so the bank each row was drawn with is
+// recorded and replayed mirrored; rows the beam has not reached yet this frame
+// take last frame's (docs/HACKS.md). Taken at the start of a frame, so a
+// change never tears one.
 
 module video #(
-    parameter logic [8:0] VBEND = 9'd16
+    parameter logic [8:0] VBEND = 9'd16,
+    // Where the vertical counter sits at reset. 0 is the natural one and is
+    // what sim/video_tb mirrors; the board passes 256 so its raster is in the
+    // same phase as MAME's screen, which starts at vblank.
+    parameter logic [8:0] VCNT_RST = 9'd0
 ) (
     input  logic        clk,          // clk_sys, 40 MHz
     input  logic        rst_n,
+    // The raster counters alone. Kept running while the rest is in reset, so
+    // the display never loses sync (see rtl/balsente_core.sv).
+    input  logic        raster_rst_n,
 
     // The palette bank, sampled per line: palette_select_w changes it mid-frame
     // (docs/MAME_KLUDGES.md).
     input  logic [1:0]  palbank,
+
+    input  logic        flip,
 
     // Video RAM, byte wide, 0x0800-0x7fff as 0..30719. Registered read.
     output logic [14:0] vram_addr,
@@ -62,17 +80,25 @@ module video #(
     output logic        vsync,
     output logic        hblank,
     output logic        vblank,
-    output logic        ce_pix
+    output logic        ce_pix,
+
+    // The raster position, for whatever else needs it. The interrupt tap does,
+    // and a second counter of its own would be a second thing to keep in step.
+    output logic [8:0]  hpos,
+    output logic [8:0]  vpos
 );
 
     logic [2:0] phase;
     logic [8:0] hcnt, vcnt;
+    assign hpos = hcnt;
+    assign vpos = vcnt;
     logic [7:0] row;
     logic       visible, line_start, frame_start;
 
-    video_timing #(.VBEND(VBEND)) u_timing (
-        .clk(clk), .rst_n(rst_n),
+    video_timing #(.VBEND(VBEND), .VCNT_RST(VCNT_RST)) u_timing (
+        .clk(clk), .rst_n(raster_rst_n),
         .ce_pix(ce_pix), .phase(phase), .hcnt(hcnt), .vcnt(vcnt), .row(row),
+        // hpos/vpos are the same counters, published
         .hblank(hblank), .vblank(vblank), .hsync(hsync), .vsync(vsync),
         .visible(visible), .line_start(line_start), .frame_start(frame_start)
     );
@@ -86,6 +112,19 @@ module video #(
     wire [7:0] nrow     = nvcnt[7:0] - VBEND[7:0];
     wire       nvis     = (nx < 9'd256) && (nvcnt >= VBEND) && (nvcnt < 9'd256);
 
+    logic      flip_f;
+    always_ff @(posedge clk or negedge rst_n)
+        if (!rst_n)           flip_f <= 1'b0;
+        else if (frame_start) flip_f <= flip;
+
+    // The stored pixel the fetched one shows.
+    wire [7:0] crow     = flip_f ? 8'd239 - nrow : nrow;
+    wire [7:0] cx       = flip_f ? 8'd255 - nx[7:0] : nx[7:0];
+
+    // The bank each row was drawn with, for flip screen's mirrored replay.
+    logic [1:0] bank_row [0:255];
+    wire  [1:0] bank     = flip_f ? bank_row[crow] : palbank;
+
     // ------------------------------------------------------------- sprites
     // Filled during this line for the next one.
     logic [3:0] spr_nib;
@@ -94,10 +133,12 @@ module video #(
     sprite_engine #(.VBEND(VBEND)) u_spr (
         .clk(clk), .rst_n(rst_n),
         .line_start(line_start),
-        .build_line(nvcnt + 9'd1),
+        // Flipped, displayed line L shows stored line 2*VBEND + 239 - L.
+        .build_line(flip_f ? {VBEND[7:0], 1'b0} + 9'd238 - nvcnt : nvcnt + 9'd1),
+        .build_sel(~nvcnt[0]),
         .sram_addr(sram_addr), .sram_q(sram_q),
         .rom_addr(rom_addr), .rom_q(rom_q),
-        .disp_sel(nvcnt[0]), .disp_x(nx[7:0]), .disp_nibble(spr_nib),
+        .disp_sel(nvcnt[0]), .disp_x(cx), .disp_nibble(spr_nib),
         .busy(spr_busy)
     );
 
@@ -114,12 +155,13 @@ module video #(
             case (phase)
                 3'd0: begin
                     // two pixels a byte: 128 bytes a row
-                    vram_addr <= {nrow, 7'b0} + 15'(nx[7:1]);
+                    vram_addr <= {crow, 7'b0} + 15'(cx[7:1]);
                     vis_n     <= nvis;
                 end
                 3'd3: begin
                     // sprite nibble high, background low, inside the bank
-                    pal_addr <= {palbank, spr_nib, nx[0] ? vram_q[3:0] : vram_q[7:4]};
+                    pal_addr <= {bank, spr_nib, cx[0] ? vram_q[3:0] : vram_q[7:4]};
+                    if (nx == 9'd0 && vis_n) bank_row[nrow] <= palbank;
                 end
                 3'd5: begin
                     nr <= pal_q[3:0];        // byte 0

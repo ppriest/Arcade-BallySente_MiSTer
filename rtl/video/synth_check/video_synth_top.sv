@@ -32,7 +32,7 @@ module video_synth_top (
     logic        hsync, vsync, hblank, vblank, ce_pix;
 
     video #(.VBEND(9'd16)) dut (
-        .clk(clk), .rst_n(rst_n),
+        .clk(clk), .rst_n(rst_n), .raster_rst_n(rst_n), .flip(1'b0),
         .palbank(pat[1:0]),
         .vram_addr(vram_addr), .vram_q(pat[7:0]),
         .sram_addr(sram_addr), .sram_q(pat[15:8]),

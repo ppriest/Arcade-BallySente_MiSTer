@@ -1,0 +1,12 @@
++incdir+rtl/sound
+rtl/sound/pit8253.sv
+rtl/sound/sente6vb_io.sv
+rtl/sound/sente6vb_params.sv
+rtl/sound/cem3394_coef.sv
+rtl/sound/vco_blep.sv
+rtl/sound/vco_blamp.sv
+rtl/sound/cem3394_vco.sv
+rtl/sound/tanh_lut.sv
+rtl/sound/cem3394_lpf4.sv
+rtl/sound/sente6vb_audio.sv
+sim/audio_tb/tb_audio.sv

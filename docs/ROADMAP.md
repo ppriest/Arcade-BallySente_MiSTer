@@ -254,28 +254,34 @@ is added; the figures below are the core's own declared memories.
 | NOVRAM 2 × 256 × 4 | 2,048 | |
 | CEM3394 state, 6 voices | small | register file, not a RAM |
 
-Total core-owned ≈ 432 Kbit, about 8% of the device. ROMs live in SDRAM, so they cost nothing
-here. **This core is not BRAM-constrained**, which means CRT v-size adjustment is affordable
-(`references/crt_offset.md`).
+| program ROM 262,144 × 8 | 2,097,152 | 256 KB for every set; 128 KB sets leave half empty |
+| sprite ROM 65,536 × 8 | 524,288 | gfx1 is 64 KB in every set |
+| 6VB ROM 8,192 × 8 | 65,536 | |
+
+Total core-owned ≈ 3.1 Mbit. The framework outside `emu` used 384 Kbit in the Fuuki build
+(the scaler 315 Kbit, two OSDs 64 Kbit), so about 3.5 of 5.66 Mbit, 62%.
+
+Measured, build 8c6dd0f: **495 of 553 M10K**. Count blocks, not bits: the program ROM alone is
+256, and the RAMs shared with the video side are built twice, one copy per read port (video RAM
+64). A single true dual-port copy measured 458 (ec01918) but showed static on hardware and was
+reverted; `altsyncram` needs the MS32 core's form, port B on its own clock input. Beyond that:
+`nametune` on its own `.rbf` (-128), or the program ROM in SDRAM (-256).
 
 ## Memory plan
 
-Everything in SDRAM; the DDR3 window is not used.
+**Everything in block RAM; no SDRAM, no DDR3** (changed from SDRAM in Phase 2, approved). The
+ROMs fit on-chip (above), every read has a fixed one-cycle latency -- the latency both boards were
+verified against in simulation -- and the core needs no SDRAM board.
 
-| Region | Size | Client |
-|---|---|---|
-| maincpu | 256 KB | 6809 bank windows AB/CD/EF through the cartridge address mapper |
-| gfx1 | 128 KB | sprite line engine |
-| audiocpu | 8 KB | 6VB Z80 — the same ROM for every game |
-| 68k | 16 KB | `shrike` only |
+| Region | Size | Client | Download offset |
+|---|---|---|---|
+| maincpu | 256 KB | 6809 bank windows AB/CD/EF through the cartridge address mapper | 0x00000 |
+| gfx1 | 64 KB | sprite line engine | 0x40000 |
+| audiocpu | 8 KB | 6VB Z80, the same ROM for every game | 0x50000 |
+| configuration | 32 bytes | cartridge wiring and the input map | 0x52000 |
 
-Worst case 408 KB in a 128 MB module. The RTL's `localparam`s are the source of truth and the
-`.mra` generator reads them (`references/sdram_ddr_maps.md`).
-
-Per-scanline fetch budget: 40 sprites × 4 header bytes + 40 × 8 pixels × 4 bytes/row = 1,440
-bytes worst case per line, against 320 pixel clocks at 5 MHz = 64 µs. At any plausible SDRAM
-clock this is not close to a limit. The 8 KB sound ROM and the 6809's banked windows can be
-cached or simply read on demand; a 1.25 MHz CPU leaves enormous slack.
+`scripts/build_mra.py` writes the layout and `rtl/balsente_core.sv` decodes it. `shrike`'s 68000
+program (16 KB) is Phase 4 and fits the same way.
 
 ## Design decisions
 
@@ -390,6 +396,12 @@ a run, which needs the CPU driving the RAM rather than a replayed write log -- P
 
 **Phase 2 — Hardware bring-up and the first games.**
 
+**The 6VB board's digital side is Phase 2 work** (scope change, approved): the Z80, the 8253,
+the 6VB I/O, its ACIA and the serial link, and the counter-0 timer the calibration measures, with
+no audio path. Every game sends the 6VB a byte at boot and waits for the answer, which comes when
+the 6VB's calibration finishes -- frame 560 in MAME for `cshift` -- so without it no game gets past
+boot (`docs/HARDWARE_NOTES.md`, "The ACIA is not optional").
+
 SDRAM backend with all clients, ROM download, the cartridge address mapper, `.mra` generation,
 inputs, DIPs, NOVRAM with a real save file, the ISSP probe and the OSD debug page. The standard
 feature set: CRT offset and v-size, hiscore, fast DDR ROM loading, HDMI scaling and crop, audio
@@ -402,8 +414,8 @@ Exit criteria: `sentetst` passes its own diagnostic, and `cshift`, `hattrick`, `
 
 **Phase 3 — Sound.**
 
-The 6VB board end to end: Z80, 8253, both ACIAs and the serial link, the DAC/register/chip-select
-path, the MM5837 noise source, and the six voices from the Phase 0 spike promoted to a full
+The 6VB board's audio path, on top of the digital side Phase 2 brought in: the MM5837 noise
+source, and the six voices from the Phase 0 spike promoted to a full
 instrument with the RC and mixer network. Exit criteria: the calibration routine converges on
 hardware; register-write traces captured from MAME reproduce correct audio by ear and by a
 decoded capture against MAME's output, with every known divergence written into
@@ -481,8 +493,37 @@ running it in MAME and looking.
 5. ~~Phase 0: check the model against MAME's own audio.~~ Done for `cshift`: level +0.00 dB,
    worst octave 0.01 dB, against a 1.28 dB control. Repeat for `snakepit`, `gimeabrk` and
    `nametune` to cover high resonance, noise mixing and filter FM.
-6. Phase 0: the CEM3394 voice in RTL, checked against the model; then the calibration-loop
-   bench, which needs the sound Z80 and the 8253 — **the rest of the gate**.
+6. ~~Phase 0: the CEM3394 voice in RTL, checked against the model; then the calibration-loop
+   bench.~~ Done; criterion 5 met.
 7. ~~Phase 0: standalone Fmax and area for `mc6809i`.~~ Done: 1,472 ALMs, Fmax 79.3 MHz with
    the enable multicycle and 51.78 MHz without, against a 40 MHz `clk_sys`.
 8. Fill `THIRD-PARTY.md` from the reuse map, with each dependency's licence text located.
+9. Phase 2: both boards in simulation. `sim/board_tb` runs the main board and the 6VB's
+   digital side from their own ROMs; `cshift`'s video RAM, palette and sprite list are
+   byte-identical to MAME's at frames 900 and 1200. Next: ROM download, the `.mra`, SDRAM,
+   the top level with `sys/`, inputs, DIPs, NOVRAM save, OSD and Pause, and a first `.rbf`.
+10. Phase 2 on hardware: `cshift` boots and plays on the DE10-nano, silent (reported by the user,
+    build 8c6dd0f, `Arcade-BallySente_10000002.rbf`). Still to check there: `sentetst`'s own
+    diagnostic, `hattrick`, `toggle`, `gghost` (trackballs are Phase 4), the DIPs, the NOVRAM
+    save, Pause.
+12. Phase 3 (started): the whole 6VB audio in RTL and wired to `AUDIO_L/R`. The integer
+    specification (`scripts/sente6vb_audio.py`, with `cem3394_params.py` and `cem3394_coef.py`)
+    matches MAME's cshift recording as closely as the float model does (level +0.01 dB, worst
+    octave 0.20 dB, envelope +0.9863, 10 s in-game); the RTL matches the specification bit for
+    bit (`sim/audio_tb`: 1,056,000 samples, 283,087 recorded writes, 0 mismatches) and keeps up
+    at 96 kHz with all six voices at 17.4 kHz under FM (0 late ticks). One oscillator, one
+    coefficient unit and one filter serve all six voices, as concurrent stages. The core follows
+    the audio-enable bit, so boot calibration is silent where MAME plays it (MAME_KLUDGES).
+    The core was silent on hardware: the 6VB's CPU read every ACIA register one read late, so
+    each command byte arrived as the status, 0x83 (LESSONS_LEARNED). Fixed; in `sim/board_tb`
+    (cshift, coin at 5 s) the 6VB's 459,264 voice writes to 15 s match MAME's exactly until
+    11.818 s, where one DAC value differs slightly (0x35D8 against 0x3612); 8253 count reads
+    already differ by one from 1.01 s without changing a write. Not traced further.
+11. ~~HDMI "Unsupported" with `video_mode=1440,1080,60`.~~ Fixed by 36cc39a: the HDMI PLL's
+    output counter pinned to the site every other core uses (LESSONS_LEARNED). Confirmed on the
+    user's display.
+13. Phase 4 (started): `.mra` files for all 26 sets the RTL runs, and the ADC with trackball,
+    dial and analog-stick inputs. `sim/adc_tb` replays MAME's selects and reads with the ports
+    held at known values: 0 mismatches over minigolf (shift 2, 810 reads), snakepit (shift 1,
+    2,383), sfootbal and stocker (shift 0, 4,886 and 931). `sim/analog_tb` checks the MiSTer
+    device mapping. Remaining: teamht, grudge, spiker, rescraid, stompin, nstocker, shrike.

@@ -48,7 +48,7 @@ set_global_assignment -name ECO_OPTIMIZE_TIMING ON
 set_global_assignment -name PERIPHERY_TO_CORE_PLACEMENT_AND_ROUTING_OPTIMIZATION ON
 set_global_assignment -name PHYSICAL_SYNTHESIS_ASYNCHRONOUS_SIGNAL_PIPELINING ON
 set_global_assignment -name ALM_REGISTER_PACKING_EFFORT MEDIUM
-set_global_assignment -name SEED 1
+set_global_assignment -name SEED 2
 
 #set_global_assignment -name VERILOG_MACRO "MISTER_FB=1"
 
@@ -73,6 +73,12 @@ set_global_assignment -name SEED 1
 # Disable ALSA audio output to save some resources
 #set_global_assignment -name VERILOG_MACRO "MISTER_DISABLE_ALSA=1"
 
+# The HDMI PLL's output counter, where every other core's fitter puts it. Main_MiSTer
+# reprograms the HDMI clock at run time by writing one fixed physical C counter; left
+# free, this core's fitter used X0_Y7, the write missed, and the clock stayed at its
+# compiled 148.5 MHz: 1080p60 worked and every other video_mode showed "Unsupported"
+# (confirmed on hardware with 1440x1080, docs/LESSONS_LEARNED.md).
+set_location_assignment PLLOUTPUTCOUNTER_X0_Y5_N1 -to "pll_hdmi:pll_hdmi|pll_hdmi_0002:pll_hdmi_inst|altera_pll:altera_pll_i|altera_cyclonev_pll:cyclonev_pll|counter[0].output_counter"
 source sys/sys.tcl
 source sys/sys_analog.tcl
 source files.qip

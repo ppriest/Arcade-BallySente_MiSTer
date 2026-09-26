@@ -58,7 +58,10 @@ def read_member(zf, name, crc):
     raise KeyError(name)
 
 
-def build(game, region, driver=None):
+def build(game, region, driver=None, zips=None):
+    """`zips`: search these zip names in order (a clone's own, then its
+    parent's) instead of the set's zip alone; a split set keeps shared ROMs in
+    the parent."""
     src = Path(driver or setting("MAME_SRC", None, REPO))
     body = blocks(src.read_text(encoding="utf-8", errors="replace")).get(game)
     if body is None:
@@ -78,7 +81,24 @@ def build(game, region, driver=None):
         sys.exit("unparsed ROM records:\n  " + "\n  ".join(unknown))
 
     img = bytearray(size)
-    zf = zipfile.ZipFile(find_zip(game))
+    # A clone in a merged set has no zip of its own; its parent's holds it.
+    names = zips or [f"{game}.zip"]
+    have = [z for z in names if any((Path(d) / z).is_file() for d in rom_zips())]
+    zfs = [zipfile.ZipFile(find_zip(z[:-4])) for z in (have or names[:1])]
+
+    class _Multi:
+        def read(self, name):
+            for z in zfs:
+                try:
+                    return z.read(name)
+                except KeyError:
+                    pass
+            raise KeyError(name)
+
+        def infolist(self):
+            return [i for z in zfs for i in z.infolist()]
+
+    zf = _Multi()
     last = None       # the file a ROM_CONTINUE/ROM_RELOAD carries on from
     consumed = 0      # how much of it a ROM_CONTINUE has already taken
     for rec in records:

@@ -22,6 +22,7 @@ module tb_cem3394_vco;
     logic signed [DW-1:0] ramp, pulse, triang;
 
     cem3394_vco #(.PH_BITS(PH_BITS), .P_FRAC(P_FRAC)) dut (
+        .voice(3'd0),
         .clk(clk), .rst_n(rst_n),
         .step(step), .inv_step(inv_step), .pw(pw),
         .in_valid(in_valid), .out_valid(out_valid),

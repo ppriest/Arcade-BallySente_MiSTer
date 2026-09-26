@@ -1,0 +1,3 @@
++incdir+rtl/sound
+rtl/sound/sente6vb_params.sv
+sim/params_tb/tb_params.sv

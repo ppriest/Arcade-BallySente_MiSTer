@@ -36,10 +36,17 @@ import zlib
 import xml.etree.ElementTree as ET
 
 
-def _zip_read(zs, name):
+def _zip_read(zs, name, crc=None):
     """The file from the first of the zips that has it: an .mra names several
-    with zip="a.zip|b.zip"."""
-    for z in (zs if isinstance(zs, (list, tuple)) else [zs]):
+    with zip="a.zip|b.zip". Main_MiSTer's FileOpenZip looks a part up by its
+    crc first and by name only if that fails, which is what finds a clone's
+    ROMs in a merged parent zip."""
+    zs = zs if isinstance(zs, (list, tuple)) else [zs]
+    for z in zs:
+        if crc is not None:
+            for i in z.infolist():
+                if i.CRC == crc:
+                    return z.read(i)
         names = {n.split('/')[-1]: n for n in z.namelist()}
         if name in names:
             return z.read(names[name])
@@ -54,7 +61,8 @@ def _part_data(z, el):
     MRA-Alternatives, e.g. the 720 Degrees and APB sets, which slice a 0x10000
     dump into two 0x8000 halves -- one of them inside an <interleave>).
     """
-    d = _zip_read(z, el.get("name"))
+    d = _zip_read(z, el.get("name"),
+                  int(el.get("crc"), 16) if el.get("crc") is not None else None)
     # crc is the WHOLE file's CRC32, checked before any slice -- so a sliced
     # part still names the dump it was cut from.
     if el.get("crc") is not None:

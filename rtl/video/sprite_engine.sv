@@ -51,7 +51,11 @@ module sprite_engine #(
     input  logic        rst_n,
 
     input  logic        line_start,   // begin filling for `build_line`
-    input  logic [8:0]  build_line,   // absolute scanline the buffer is for
+    input  logic [8:0]  build_line,   // absolute scanline whose sprites to draw
+    // Which half of the line buffer to fill: the parity of the line that will
+    // DISPLAY it. That is build_line's parity except under flip screen, where
+    // the display shows line 271 - L and the two parities are opposite.
+    input  logic        build_sel,
 
     // Sprite RAM read port, registered.
     output logic [7:0]  sram_addr,
@@ -79,7 +83,7 @@ module sprite_engine #(
     // number, and the caller asks for the line it is fetching.
     logic [3:0] lbuf [0:511];
     logic [8:0] bl;                   // the line being filled, latched
-    wire        fill = bl[0];
+    logic       fill;                 // and the half it goes in
     logic       lb_we;
     logic [8:0] lb_waddr;
     logic [3:0] lb_wdata;
@@ -144,12 +148,13 @@ module sprite_engine #(
         if (!rst_n) begin
             st <= S_IDLE; idx <= '0; cnt <= '0; clr <= '0; pix <= '0;
             sram_addr <= '0; rom_addr <= '0; ypos0 <= '0; row_base <= '0;
-            bl <= '0;
+            bl <= '0; fill <= 1'b0;
         end else begin
             case (st)
                 S_IDLE: if (line_start) begin
-                    bl  <= build_line;
-                    clr <= '0;
+                    bl   <= build_line;
+                    fill <= build_sel;
+                    clr  <= '0;
                     st   <= S_CLEAR;
                 end
 

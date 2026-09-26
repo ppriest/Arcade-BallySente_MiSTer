@@ -21,6 +21,7 @@ module vco_synth_top (
     always_ff @(posedge clk) in_valid <= pat[7] & ~busy;
 
     cem3394_vco dut (
+        .voice(3'd0),
         .clk(clk), .rst_n(rst_n),
         .step(pat), .inv_step(pat ^ 32'h5555_5555), .pw(pat ^ 32'h0F0F_0F0F),
         .in_valid(in_valid), .out_valid(out_valid),

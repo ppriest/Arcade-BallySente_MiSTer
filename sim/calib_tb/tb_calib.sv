@@ -387,7 +387,7 @@ module tb_calib;
 
     int maxcycles;
     initial begin
-        if (!$value$plusargs("maxcycles=%d", maxcycles)) maxcycles = 4000000;
+        if (!$value$plusargs("maxcycles=%d", maxcycles)) maxcycles = 16000000;   // 2 s: calibration starts at 0.5 s
         foreach (rom[i]) rom[i] = 8'h00;
         foreach (ram[i]) ram[i] = 8'h00;
         if (!$value$plusargs("prmax=%d", pr_max)) pr_max = 60000;

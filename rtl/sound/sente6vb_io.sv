@@ -47,12 +47,16 @@ module sente6vb_io (
     output logic [2:0]  cv_chip,
     output logic [2:0]  cv_reg,
     output logic [11:0] cv_dac,
+    output logic [5:0]  cv_mask,        // every chip the latch reaches
 
     // What drives counter 0's flip-flop timer in MAME: its gate, and a pulse on
     // every chip_select_w -- each of which calls update_counter_0_timer() and so
     // restarts the timer from zero.
     output logic        ctrl_gate,
     output logic        cs_update,
+
+    output logic [5:0]  counter_control, // bit 5 NMI enable, bit 0 audio enable
+    output logic [2:0]  pit_out,         // OUT 2 is the Z80's IRQ
 
     output logic        pit_unsupported
 );
@@ -61,7 +65,6 @@ module sente6vb_io (
     logic [11:0] dac_value;
     logic [2:0]  dac_register;
     logic [5:0]  chip_select;
-    logic [5:0]  counter_control;
 
     // counter_control_w() acts on the gate before it touches the flip-flop, so
     // the gate has to reach the 8253 on the same cycle the flip-flop moves --
@@ -91,7 +94,6 @@ module sente6vb_io (
     // --------------------------------------------------------------- 8253
     logic        pit_cs;
     logic [7:0]  pit_dout;
-    logic [2:0]  pit_out;
 
     // Counter 0 is clocked by the INVERSE of the flip-flop, counters 1 and 2 by
     // 2 MHz. Counter 0's OUT gates counter 1 through an inverter.
@@ -140,6 +142,7 @@ module sente6vb_io (
             dac_value <= '0; dac_register <= '0;
             chip_select <= 6'h3f; counter_control <= '0;
             cv_valid <= 1'b0; cv_chip <= '0; cv_reg <= '0; cv_dac <= '0;
+            cv_mask <= '0;
             cs_update <= 1'b0;
         end else begin
             cv_valid  <= 1'b0;
@@ -159,6 +162,7 @@ module sente6vb_io (
                         cv_valid  <= 1'b1;
                         cs_update <= 1'b1;
                         cv_chip   <= sel_first(~chip_select);
+                        cv_mask   <= ~chip_select;
                         cv_reg    <= dac_register;
                         cv_dac    <= io_addr[0] ? {dac_value[11:6], io_din[7:2]}
                                                 : {io_din[5:0], dac_value[5:0]};
@@ -175,6 +179,7 @@ module sente6vb_io (
                     if (|rising) begin
                         cv_valid <= 1'b1;
                         cv_chip  <= sel_first(rising);
+                        cv_mask  <= rising;
                         cv_reg   <= dac_register;
                         cv_dac   <= dac_value;
                     end
@@ -183,9 +188,8 @@ module sente6vb_io (
         end
     end
 
-    // The lowest set bit, as a chip index. The boot routine only ever raises one
-    // at a time; if a game raises several, the lowest wins and the others are
-    // dropped -- a HACKS.md entry if it is ever seen.
+    // The lowest set bit, as a chip index, for sim/calib_tb's single-voice
+    // model. cv_mask carries every chip, as chip_select_w() acts on them.
     function automatic logic [2:0] sel_first(input logic [5:0] m);
         casez (m)
             6'b?????1: sel_first = 3'd0;

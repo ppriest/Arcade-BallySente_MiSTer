@@ -15,6 +15,10 @@
 //   expected.bin                the frame the model says this should produce
 //
 //   +cap=<dir>   the capture directory, default debug/rescraid-beam
+//   +flip=1      run the core's flip screen
+//   +nowrites=1  leave the RAM as captured: a static frame, which flipped must
+//                equal the unflipped one turned 180 degrees, pixel for pixel
+//   +out=<file>  the frame's file name in the capture directory (rtl_frame.bin)
 //
 // The bench mirrors the DUT's raster counters rather than reaching into it: the
 // counters are deterministic from reset, so `beam_pos` is line * 320 + pixel
@@ -59,11 +63,14 @@ module tb_video;
     end
 
     logic [1:0] palbank;
+    logic       flip = 1'b0;
+    int         nowrites = 0;
+    string      outname;
     logic [3:0] r, g, b;
     logic       hsync, vsync, hblank, vblank, ce_pix;
 
     video #(.VBEND(VBEND)) dut (
-        .clk(clk), .rst_n(rst_n), .palbank(palbank),
+        .clk(clk), .rst_n(rst_n), .raster_rst_n(rst_n), .flip(flip), .palbank(palbank),
         .vram_addr(vram_addr), .vram_q(vram_q),
         .sram_addr(sram_addr), .sram_q(sram_q),
         .rom_addr(rom_addr), .rom_q(rom_q),
@@ -112,6 +119,12 @@ module tb_video;
 
     initial begin
         if (!$value$plusargs("cap=%s", cap)) cap = "debug/rescraid-beam";
+        if (!$value$plusargs("out=%s", outname)) outname = "rtl_frame.bin";
+        begin
+            int fl;
+            if ($value$plusargs("flip=%d", fl)) flip = 1'(fl);
+        end
+        void'($value$plusargs("nowrites=%d", nowrites));
 
         $readmemh({cap, "/vram.hex"}, vram);
         $readmemh({cap, "/sram.hex"}, sram);
@@ -154,11 +167,11 @@ module tb_video;
 
         begin
             int fo;
-            fo = $fopen({cap, "/rtl_frame.bin"}, "wb");
+            fo = $fopen({cap, "/", outname}, "wb");
             for (int i = 0; i < WIDTH*HEIGHT*3; i++) $fwrite(fo, "%c", frame[i]);
             $fclose(fo);
         end
-        $display("video_tb: %0d pixels captured -> %s/rtl_frame.bin", n_pix, cap);
+        $display("video_tb: %0d pixels captured -> %s/%s", n_pix, cap, outname);
         $finish;
     end
 
@@ -180,7 +193,7 @@ module tb_video;
     // Apply writes when the mirrored beam reaches them, during the measured
     // frame only.
     always_ff @(posedge clk) begin
-        if (measuring && phase == 0) begin
+        if (measuring && phase == 0 && nowrites == 0) begin
             while (i_w < n_w && w_pos[i_w] <= mv * HTOTAL + mh) begin
                 case (w_reg[i_w])
                     0: vram[w_off[i_w]] <= 8'(w_dat[i_w]);

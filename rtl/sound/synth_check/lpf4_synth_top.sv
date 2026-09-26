@@ -32,6 +32,7 @@ module lpf4_synth_top (
     logic signed [DW-1:0] out_sample;
 
     cem3394_lpf4 #(.TANH_FILE("../../../debug/cem3394/tanh_table.hex")) dut (
+        .voice(3'd0),
         .clk(clk), .rst_n(rst_n),
         .alpha(pat[CW-1:0]), .beta0(pat[CW:1]), .beta1(pat[CW+1:2]),
         .beta2(pat[CW+2:3]), .beta3(pat[CW+3:4]), .alpha0(pat[CW+4:5]),

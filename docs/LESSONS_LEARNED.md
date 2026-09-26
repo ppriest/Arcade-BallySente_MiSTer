@@ -209,6 +209,17 @@ class of wrong-looking frames behind it.
 A core reported as clocking at 96 MHz on a board whose CPU runs at 16 MHz is a wrong number, not a
 fast core. Compare every derived clock with the driver's crystal before believing a timing report.
 
+### [BallySente] A late divergence can be a wait that the reference leaves and the RTL does not
+
+The board bench's video RAM matched MAME at frames 120, 300 and 600 and differed from 900, and the
+cause was put down to the ACIA's transmitter -- the most-polled register -- and written into the
+notes. A faithful ACIA changed nothing. Diffing the stream of output writes, rather than RAM
+snapshots, showed both sides idle from frame 25: the main program had sent the sound board a byte
+and was waiting for an answer that, in MAME, comes at frame 560 when the sound board finishes
+calibrating. The RAM matched at 600 because nothing was being drawn. So when a whole-board bench
+drifts late, find where the reference's write stream resumes and read the I/O just before it;
+a snapshot match inside an idle stretch says nothing.
+
 ## ROM loading: .mra, byte order, deployment
 
 ### [Seta] A `<dip>`'s `bits` is a range, "first,last", not a list
@@ -701,6 +712,13 @@ mirror passes a fill-then-verify test if a write tap shows nothing else writes t
 
 ## Testbench discipline
 
+- **[BallySente] A bench that passes on zeros has not tested anything; count what it compared.**
+  The 6VB audio bench matched its specification bit for bit over 1,056,000 samples, but the
+  vectors ended at 11 s and the core mutes until 9.47 s, so 7,799 samples were non-zero. The level
+  check against MAME ran in the specification's MAME mode, which plays from reset. Neither
+  covered the core's own path from received command to sound, and the core shipped silent. Print
+  the non-zero count beside every pass, and run one whole-machine bench to the point where the
+  output is supposed to be live.
 - **[BallySente] When a bench's checker disagrees with the RTL, read what the program actually
   programmed before assuming the RTL is wrong.** The 6VB calibration bench reported 44 of 66
   measurements out of tolerance by thousands of counts. The RTL was right: partway through, the
@@ -945,6 +963,14 @@ structural; a multicycle over it is a promise the design does not make.
 
 ## CPU cores (TG68K.C, T80, vendored CPUs)
 
+- **[BallySente] T80 with CLKEN samples DI on the same enable as the read strobe a peripheral
+  sees.** The 6VB latched the ACIA's output into a register on that strobe and fed the register
+  to DI, so the CPU got the PREVIOUS ACIA read every time: a status read returned the last data
+  byte (the NMI handler saw no byte, left and re-entered) and every data read returned the status,
+  0x83. The serial handshake at boot still worked, because any reply would do, and 208,471 port
+  writes matched MAME through calibration; the first sign was the sound program never leaving its
+  idle loop. Found by logging opcode fetches and the bus around one read in the whole-core bench
+  (`+pclog`). Drive DI from the peripheral's output during the strobe, and from the latch after.
 ### Budget for the 68k core to be the Fmax-limiting block
 
 Post-fit, Cyclone V speed grade 7: 48.74 MHz, all 50 worst paths inside `TG68KdotC_Kernel`
@@ -1066,6 +1092,24 @@ ack address that is also an input port must acknowledge on writes only.
   message naming them. What worked: a textbook simple-dual-port module (`gx_sdpram.sv`) instanced
   per memory, one read port shared. A standalone synth harness per block found all three; in the
   full design they would have been a failed fit pointing at nothing.
+- **[BallySente] A `case` choosing between arrays inside the registered read is not a RAM.**
+  `case (a) 0: q <= pal0[x]; 1: q <= pal1[x]; ...` gave "uninferred due to asynchronous read
+  logic" for all four palette planes: 32 Kbit of registers, and the fit failed on routing, not
+  on size. Each array gets its own `q_n <= pal_n[x]`; select after the register.
+- **[BallySente] Quartus 17 rejects `foreach` in an `initial` block** (`Error (10170)`); use a
+  `for` loop. Verilator and ModelSim accept it, so only the first compile finds it.
+- **[BallySente] `quartus_fit` 17.0.2 can crash with an Access Violation** at "Fitter placement
+  preparation", reproducibly, with `db/` and `incremental_db/` cleared. Another seed built
+  (seed 1 crashed twice, seed 2 fitted with +4.187 ns); pin it in the `.qsf`.
+- **[BallySente] Check where the fitter put `pll_hdmi`'s output counter.** Main_MiSTer
+  reprograms the HDMI clock by writing one fixed physical C counter (`setPLL()`), and nothing in
+  `sys/` pins which counter `outclk_0` lands on. This core's fits put it at
+  `PLLOUTPUTCOUNTER_X0_Y7`, where the write misses and the clock stays at its compiled 148.5 MHz:
+  `video_mode=8` (1080p60, exactly 148.5 MHz) worked and every other mode showed "Unsupported"
+  on the display, while the scaler's screenshots looked perfect. Ten fits across five other
+  cores had it at `X0_Y5`. Pinned in the `.qsf` with `set_location_assignment
+  PLLOUTPUTCOUNTER_X0_Y5_N1` on `...cyclonev_pll|counter[0].output_counter`; confirmed on
+  hardware. The fit report's PLL Usage Summary shows the site of every build.
 - **[MS32] Past about 90% of M10K, count blocks, not bits.** An M10K is 1024 x 10 (or 256 x 40, 8192
   x 1), so a 32,768 x 16 RAM is 64 blocks however many bits it holds. 82% of bits and still over 553
   blocks.
@@ -1196,6 +1240,13 @@ ack address that is also an input port must acknowledge on writes only.
   press Start (the `wtiming.lua` field pattern), then compare from after the attract sequence.
   The check that catches this cheaply: diff the REFERENCE captures against each other first. If
   two different games give the same reference, the stimulus is not the game.
+- **[BallySente] Log what an analog port READS after `field:set_value`, not the value set.**
+  The override is clamped to the field's `PORT_MINMAX` with `std::clamp` (`analog_field::set_value`
+  in `emu/ioport.cpp`); a signed range such as `PORT_MINMAX(0x80,0x7f)` has min above max, so
+  every value lands on 0x80 or 0x7f. An ADC capture of Street Football that logged the requested
+  values mismatched the RTL on 4,874 of 4,886 reads; logging `port:read()` instead, 0. The
+  override also bypasses sensitivity and `PORT_REVERSE`, so such a capture checks the board's
+  converter, not the input mapping.
 - **[Fuuki] [GX] Keep every Lua subscription in a GLOBAL.** `add_machine_frame_notifier` and
   `install_write_tap` return subscription objects; dropped, the GC reclaims them and the callback
   silently stops firing, exit 0. A `local subs = {}` at chunk scope is not enough: chunk-locals
@@ -1326,7 +1377,7 @@ ack address that is also an input port must acknowledge on writes only.
   from a wrapper. `*.sh text eol=lf`, same for `.tcl` and `.lua`. `git add --renormalize` fixes the
   index only.
 - **[MS32] `Path.read_text()`/`write_text()` without `encoding=` corrupts UTF-8 on Windows.**
-  Default cp1252; `Ã—` and `Â°` became single bytes and a file with an undecodable byte refused to
+  Default cp1252; `×` and `°` became single bytes and a file with an undecodable byte refused to
   load, so half an edit landed. Every repo-file `open` names `encoding="utf-8"`; a multi-file patch
   script checks all files in first.
 - **[GX] Never read a file inside the argument list of the call that truncates it.** `open(p,

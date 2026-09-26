@@ -1,0 +1,2 @@
+rtl/analog_inputs.sv
+sim/analog_tb/tb_analog.sv

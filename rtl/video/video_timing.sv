@@ -31,7 +31,11 @@ module video_timing #(
     parameter logic [8:0] VBEND   = 9'd16,
     parameter logic [8:0] VBSTART = 9'd256,
     parameter logic [8:0] VSSTART = 9'd258,   // middle of the 8-line blanking
-    parameter logic [8:0] VSEND   = 9'd261
+    parameter logic [8:0] VSEND   = 9'd261,
+    // Where the counter sits at reset. MAME starts a screen at VBLANK START,
+    // so a bench comparing against its trace must too or every VBLANK the CPU
+    // reads is a whole frame out of phase.
+    parameter logic [8:0] VCNT_RST = 9'd0
 ) (
     input  logic       clk,        // clk_sys, 40 MHz
     input  logic       rst_n,
@@ -54,7 +58,7 @@ module video_timing #(
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            div <= '0; hcnt <= '0; vcnt <= '0;
+            div <= '0; hcnt <= '0; vcnt <= VCNT_RST;
         end else begin
             div <= div + 3'd1;
             if (div == 3'd7) begin

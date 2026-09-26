@@ -159,6 +159,26 @@ the ACIA drives the Z80's **NMI**, gated by bit 5 of the counter-control registe
 LS259 outputs 0-6 drive lamps; output 7 is **NOVRAM recall** (active low through
 `nvrecall_w`).
 
+### The ACIA is not optional, even for a silent core
+
+`cshift` sends 0xE0 to the 6VB early in boot and then polls the status register until a
+byte comes back. In MAME's trace (`scripts/mame_sys_trace.py cshift 700`) that is 479,062
+reads of 0x02 (TDRE only) from seq 190527, then 0x03 at seq 4137786 in frame 560, one data
+read of 0x00, and the attract sequence carries on. The 6VB sends that byte when its
+self-calibration ends: its control writes come in calibration bursts from 0.5 s to about
+9.3 s and steady music from 9.5 s (`debug/cshift-snd/cshift_snd.trace`), and frame 560 is
+9.3 s.
+
+So the reply time is set by the 6VB program measuring its own oscillators, and a game waits
+for it on every boot. `sim/board_tb` with nothing on the far end of the link writes exactly
+MAME's output stream (watchdog kicks aside) up to the wait, then stops: 36,456 writes of
+MAME's 75,636 in 700 frames, all identical.
+
+Both ACIAs are clocked from the 6VB's 500 kHz `clock_out` (`sente6vb.cpp`, 8 MHz / 16). With
+the 6VB's digital side on the far end (`rtl/sound/sente6vb.sv`), `sim/board_tb` reads the 0x00
+answer at its frame 561, which is MAME's 560 (the bench counts one frame later), and video RAM,
+palette and sprite list are byte-identical to MAME's at frames 900 and 1200.
+
 ### Interrupts
 
 - **IRQ** every 64 scanlines — asserted at scanline 0, 64, 128, 192, then back to 64 —

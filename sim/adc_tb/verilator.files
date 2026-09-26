@@ -1,0 +1,2 @@
+rtl/adc.sv
+sim/adc_tb/tb_adc.sv

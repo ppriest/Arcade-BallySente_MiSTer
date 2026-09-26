@@ -1,7 +1,7 @@
 # T80 provenance
 
-**In this repository:** copied from the Fuuki core's `rtl/cpu/t80/`, unchanged and
-byte-identical. Bally/Sente's sound CPU is the Z80 on the 6VB audio board at 4 MHz
+**In this repository:** copied from the Fuuki core's `rtl/cpu/t80/`; one line of `T80.vhd` is
+since changed here (below, "`T80.vhd` is no longer byte-identical"). Bally/Sente's sound CPU is the Z80 on the 6VB audio board at 4 MHz
 (`sente6vb.cpp:107`), driven through `T80se` with a clock enable from `clk_sys`/10.
 Fuuki took it from Psikyo unchanged; the notes below are Psikyo's, and the Fuuki status
 block at the end is Fuuki's evidence, not this core's.
@@ -147,3 +147,9 @@ the `SBC HL,DE` sequence the calibration compares with, prints the result and ev
 checks the sign against the result's bit 15. Kept as a regression, and as the shape to copy when
 an instruction's flags are next in question -- an isolated bench answered in seconds what a
 1.2-million-line trace diff could only point at.
+
+## Under Verilator
+
+The Verilator benches take T80 as GHDL's Verilog conversion (`scripts/verilator_prep.sh`, generics
+fixed at Mode 0, T2Write 0, IOWait 1). The conversion is checked the same way as the VHDL:
+`scripts/run_verilator.sh sound_cpu_tb` against MAME's boot trace, 60,000 accesses, 0 differences.

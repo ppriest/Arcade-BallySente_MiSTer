@@ -31,8 +31,13 @@
 //   rounding     round-half-up: (product + 2^(CW_FRAC-1)) >>> CW_FRAC
 //   saturation   to the signed datapath range, after every operation
 //
-// Coefficients are inputs. They change only when the sound CPU writes a control
-// voltage, so their tan/reciprocal work belongs in a sequential unit, not here.
+// Coefficients are inputs, computed per sample by rtl/sound/cem3394_coef.sv:
+// the cutoff is frequency-modulated by the triangle, so they can change every
+// sample.
+//
+// SHARED BY NV VOICES: the four stage states are an array indexed by `voice`,
+// loaded when a sample starts and written back when it ends. NV = 1 is the
+// single voice sim/cem3394_lpf4_tb checks.
 
 module cem3394_lpf4 #(
     parameter int DW_INT     = 4,                   // integer bits, including sign
@@ -45,10 +50,12 @@ module cem3394_lpf4 #(
     parameter int CW_FRAC    = 22,
     parameter int CW         = CW_INT + CW_FRAC,
     parameter int TANH_LOG2N = 10,
-    parameter     TANH_FILE  = "tanh_table.hex"
+    parameter     TANH_FILE  = "tanh_table.hex",
+    parameter int NV         = 1
 ) (
     input  logic                    clk,
     input  logic                    rst_n,
+    input  logic [2:0]              voice,          // sampled with in_valid
 
     // Coefficients, held stable while busy.
     input  logic signed [CW-1:0]    alpha,          // G, the same for all four stages
@@ -79,6 +86,8 @@ module cem3394_lpf4 #(
 
     // ---------------------------------------------------------------- state
     logic signed [DW-1:0] st0, st1, st2, st3;
+    logic signed [DW-1:0] st0_m [0:NV-1], st1_m [0:NV-1], st2_m [0:NV-1], st3_m [0:NV-1];
+    logic [2:0]           vi;
     logic signed [DW-1:0] sigma, x, u, u_pre;
     logic [3:0]           step;
     // Three cycles per step, each holding one piece of the path: select the
@@ -150,7 +159,10 @@ module cem3394_lpf4 #(
         logic signed [DW-1:0] u_next;
 
         if (!rst_n) begin
-            st0 <= '0; st1 <= '0; st2 <= '0; st3 <= '0;
+            st0 <= '0; st1 <= '0; st2 <= '0; st3 <= '0; vi <= '0;
+            for (int i = 0; i < NV; i++) begin
+                st0_m[i] <= '0; st1_m[i] <= '0; st2_m[i] <= '0; st3_m[i] <= '0;
+            end
             sigma <= '0; x <= '0; u <= '0; u_pre <= '0;
             prod <= '0; mul_a_r <= '0;
             tanh_start <= 1'b0;
@@ -168,6 +180,11 @@ module cem3394_lpf4 #(
             if (!running) begin
                 if (in_valid) begin
                     x       <= in_sample;
+                    vi      <= voice;
+                    st0     <= st0_m[voice];
+                    st1     <= st1_m[voice];
+                    st2     <= st2_m[voice];
+                    st3     <= st3_m[voice];
                     step    <= 4'd0;
                     ph      <= 2'd0;
                     running <= 1'b1;
@@ -222,6 +239,10 @@ module cem3394_lpf4 #(
                               u_next = sat(ACC'(mul_y) + ACC'(st3));
                               u          <= u_next;
                               st3        <= sat(ACC'(mul_y) + ACC'(u_next));
+                              st0_m[vi]  <= st0;
+                              st1_m[vi]  <= st1;
+                              st2_m[vi]  <= st2;
+                              st3_m[vi]  <= sat(ACC'(mul_y) + ACC'(u_next));
                               out_sample <= u_next;
                               out_valid  <= 1'b1;
                               running    <= 1'b0;

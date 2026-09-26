@@ -1,0 +1,2 @@
+obj_verilator/t80_ghdl/T80se.v
+sim/sound_cpu_tb/tb_sound_cpu.sv

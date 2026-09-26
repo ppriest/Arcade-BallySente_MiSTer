@@ -48,6 +48,10 @@ local function stop()
     if first_err then f:write("# FIRST ERROR: " .. first_err .. "\n") end
     f:write(string.format("# %d writes logged\n", n))
     f:close()
+    core_fa:close()
+    core_fr:close()
+    core_fi:close()
+    if core_fm then core_fm:close() end
     print(string.format("SNDTRACE %d writes to %s/%s_snd.trace", n, OUT, TAG))
     mach:exit()
 end
@@ -69,6 +73,68 @@ core_subs[#core_subs + 1] = io_space:install_write_tap(0x00, 0xff, "core_snd_w",
         if not done then
             local ok, err = pcall(log, offset, data)
             if not ok and not first_err then first_err = tostring(err) end
+        end
+        return data
+    end)
+
+-- The main CPU's writes to its 6850 (0x9a04 control, 0x9a05 data): the
+-- commands the sound board is sent, in <tag>_acia.trace.
+core_fa = assert(io.open(string.format("%s/%s_acia.trace", OUT, TAG), "w"))
+core_fa:write("# main CPU writes to its 6850\n# time_s\taddr\tdata\n")
+core_subs[#core_subs + 1] = mach.devices[":maincpu"].spaces["program"]:install_write_tap(
+    0x9a04, 0x9a05, "core_acia_w",
+    function(offset, data, mask)
+        if not done then
+            core_fa:write(string.format("%.9f\t%04X\t%02X\n", mach.time:as_double(), offset, data & 0xff))
+        end
+        return data
+    end)
+
+-- Every I/O access of the sound CPU, reads included, in sim/board_tb's +iolog
+-- format with a time column added: <tag>_io.trace.
+core_fi = assert(io.open(string.format("%s/%s_io.trace", OUT, TAG), "w"))
+local io_n = 0
+local function io_log(rw)
+    return function(offset, data, mask)
+        if not done then
+            io_n = io_n + 1
+            core_fi:write(string.format("%d\t%s\t%02X\tFF\t%02X\t%.9f\n", io_n, rw,
+                                        offset & 0xff, data & 0xff, mach.time:as_double()))
+        end
+        return data
+    end
+end
+core_subs[#core_subs + 1] = io_space:install_read_tap(0x00, 0xff, "core_io_r", io_log("r"))
+core_subs[#core_subs + 1] = io_space:install_write_tap(0x00, 0xff, "core_io_w", io_log("w"))
+
+-- With CORE_RAM_FROM/CORE_RAM_TO (seconds): the sound CPU's RAM writes
+-- (0x2000-0x5fff) in that window, in <tag>_ram.trace.
+local RAM_FROM = tonumber(os.getenv("CORE_RAM_FROM") or "-1")
+local RAM_TO   = tonumber(os.getenv("CORE_RAM_TO") or "-1")
+if RAM_TO > RAM_FROM then
+    core_fm = assert(io.open(string.format("%s/%s_ram.trace", OUT, TAG), "w"))
+    core_fm:write("# sound CPU RAM writes\n# time_s\taddr\tdata\n")
+    core_subs[#core_subs + 1] = cpu.spaces["program"]:install_write_tap(
+        0x2000, 0x5fff, "core_ram_w",
+        function(offset, data, mask)
+            local t = mach.time:as_double()
+            if not done and t >= RAM_FROM and t <= RAM_TO then
+                core_fm:write(string.format("%.9f\t%04X\t%02X\n", t, offset, data & 0xff))
+            end
+            return data
+        end)
+end
+
+-- The sound CPU's reads of its 6850 (0xe000 status "S", 0xe001 data "D",
+-- mirrored to 0xffff), in <tag>_rx.trace.
+core_fr = assert(io.open(string.format("%s/%s_rx.trace", OUT, TAG), "w"))
+core_fr:write("# sound CPU reads of its 6850\n# time_s\treg\tdata\n")
+core_subs[#core_subs + 1] = cpu.spaces["program"]:install_read_tap(
+    0xe000, 0xffff, "core_rx_r",
+    function(offset, data, mask)
+        if not done then
+            core_fr:write(string.format("%.9f\t%s\t%02X\n", mach.time:as_double(),
+                                        (offset & 1) == 1 and "D" or "S", data & 0xff))
         end
         return data
     end)

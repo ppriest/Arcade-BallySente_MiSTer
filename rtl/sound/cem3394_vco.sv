@@ -20,6 +20,12 @@
 // to the one after. The "after" halves are carried in *_corr to the next
 // sample, exactly as MAME carries m_ramp_correction and its siblings.
 //
+// SHARED BY NV VOICES. The state a voice carries from one sample to the next --
+// the phase and the three corrections -- is an array indexed by `voice`, read
+// when a sample starts and written back when it ends (docs/STATE.md: per-voice
+// state must stay addressable). step, inv_step and pw are the voice's own and
+// must be held while busy. NV = 1 is the single voice sim/cem3394_vco_tb checks.
+//
 // Worst case six polyBLEP calls and four polyBLAMP calls in one sample, which
 // is 6*4 + 4*13 = 76 cycles. A 96 kHz sample is 417 clk_sys cycles at 40 MHz
 // shared between six voices, so this is the part of the voice to watch; see
@@ -30,10 +36,12 @@ module cem3394_vco #(
     parameter int INV_FRAC = 20,
     parameter int T_FRAC   = 30,
     parameter int P_FRAC   = 26,
-    parameter int DW       = P_FRAC + 4
+    parameter int DW       = P_FRAC + 4,
+    parameter int NV       = 1
 ) (
     input  logic                      clk,
     input  logic                      rst_n,
+    input  logic [2:0]                voice,       // sampled with in_valid
 
     input  logic [PH_BITS-1:0]        step,        // frequency, Q0.32
     input  logic [PH_BITS-1:0]        inv_step,    // 1/step, Q12.20
@@ -52,11 +60,13 @@ module cem3394_vco #(
     // (-DW'(...)), so 1.0 in the output format is a named constant.
     localparam logic signed [DW-1:0] ONE_Q = DW'(1) <<< P_FRAC;
 
-    logic [PH_BITS-1:0] phase;
+    logic [PH_BITS-1:0] phase_m [0:NV-1];
+    logic [2:0]         vi;
     logic [PH_BITS-1:0] p, tp_reset, tp_flip, tritop;
 
     // The corrections carried into the next sample.
     logic signed [DW-1:0] ramp_corr, pulse_corr, triang_corr;
+    logic signed [DW-1:0] ramp_corr_m [0:NV-1], pulse_corr_m [0:NV-1], triang_corr_m [0:NV-1];
     logic signed [DW-1:0] cur_r, nxt_r, cur_p, nxt_p, cur_t, nxt_t;
 
     // --------------------------------------------------------------- kernels
@@ -132,11 +142,15 @@ module cem3394_vco #(
     assign busy = (st != S_IDLE);
 
     always_ff @(posedge clk or negedge rst_n) begin
-        logic [PH_BITS-1:0] nphase;
+        logic [PH_BITS-1:0] phase;
 
         if (!rst_n) begin
-            st <= S_IDLE; issued <= 1'b0; out_valid <= 1'b0;
-            phase <= '0; ramp_corr <= '0; pulse_corr <= '0; triang_corr <= '0;
+            st <= S_IDLE; issued <= 1'b0; out_valid <= 1'b0; vi <= '0;
+            for (int i = 0; i < NV; i++) begin
+                phase_m[i] <= '0; ramp_corr_m[i] <= '0;
+                pulse_corr_m[i] <= '0; triang_corr_m[i] <= '0;
+            end
+            ramp_corr <= '0; pulse_corr <= '0; triang_corr <= '0;
             ramp <= '0; pulse <= '0; triang <= '0;
             blep_start <= 1'b0; blamp_start <= 1'b0;
         end else begin
@@ -146,6 +160,11 @@ module cem3394_vco #(
 
             case (st)
                 S_IDLE: if (in_valid) begin
+                    phase     = phase_m[voice];
+                    vi          <= voice;
+                    ramp_corr   <= ramp_corr_m[voice];
+                    pulse_corr  <= pulse_corr_m[voice];
+                    triang_corr <= triang_corr_m[voice];
                     p        <= phase;
                     tp_reset <= phase + (pw >> 1);
                     tp_flip  <= phase - (pw >> 1);
@@ -250,10 +269,10 @@ module cem3394_vco #(
                     ramp  <= naive_ramp(p)      + ramp_corr  + cur_r;
                     pulse <= naive_tripulse(p)  + pulse_corr + cur_p;
                     triang   <= naive_triang(p)       + triang_corr   + cur_t;
-                    ramp_corr  <= nxt_r;
-                    pulse_corr <= nxt_p;
-                    triang_corr   <= nxt_t;
-                    phase      <= p + step;
+                    ramp_corr_m[vi]   <= nxt_r;
+                    pulse_corr_m[vi]  <= nxt_p;
+                    triang_corr_m[vi] <= nxt_t;
+                    phase_m[vi]       <= p + step;
                     out_valid  <= 1'b1;
                     st         <= S_IDLE;
                 end
