@@ -27,9 +27,7 @@ A MiSTer FPGA core for Bally/Sente's SAC-I arcade hardware (MAME's
 ## History
 
 **BallySente_20260927.rbf**
-- Beta release
-- Adds Team Hat Trick, Grudge Match, Spiker, Rescue Raider, Stompin' and Night Stocker (light gun,
-  with a crosshair). Not yet played on hardware except Night Stocker's attract mode.
+- Adds Team Hat Trick, Grudge Match, Spiker, Rescue Raider, Stompin' and Night Stocker.
 
 **BallySente_20260926.rbf**
 - Beta release
