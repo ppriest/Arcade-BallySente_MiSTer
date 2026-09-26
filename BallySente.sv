@@ -50,6 +50,7 @@ assign BUTTONS   = 0;
 `include "build_id.v"
 
 // H1: options that only reach the HDMI scaler, hidden under direct video.
+// H2: the gun (Night Stocker), hidden for every other set.
 localparam CONF_STR = {
 	"BallySente;;",
 	"-;",
@@ -65,13 +66,20 @@ localparam CONF_STR = {
 	"-;",
 	"O[6],Pause when OSD is open,Off,On;",
 	"-;",
+	// The left stick, as in the Seta core's Zombie Raid: Auto (full
+	// deflection moves the gun like the d-pad, partial aims), Aim (always
+	// aims), D-pad (always moves)
+	"H2O[8:7],Gun stick,Auto,Aim,D-pad;",
+	"H2O[9],Crosshair,On,Off;",
+	"H2-;",
 	"DIP;",
 	"-;",
 	"R[0],Reset;",
 	// Must match the .mra <buttons> list (scripts/build_mra.py) and the input
 	// map's joystick bits: 0-3 directions, 4-7 buttons, 8 Start, 9 Coin,
-	// 10 Service, 11 Pause, 12-13 Start 3 and 4.
-	"J1,Button 1,Button 2,Button 3,Button 4,Start,Coin,Service,Pause,Start 3,Start 4;",
+	// 10 Service, 11 Pause, 12-13 Start 3 and 4, 14-17 the right stick
+	// (rescraid) as R, L, D, U.
+	"J1,Button 1,Button 2,Button 3,Button 4,Start,Coin,Service,Pause,Start 3,Start 4,R Right,R Left,R Down,R Up;",
 	"jn,A,B,X,Y,Start,Select,L,R;",
 	"V,v",`BUILD_DATE
 };
@@ -81,9 +89,11 @@ wire        forced_scandoubler, direct_video;
 wire [21:0] gamma_bus;
 wire  [1:0] buttons;
 wire [127:0] status;
-wire [31:0] joystick_0, joystick_1;
-wire [15:0] joystick_l_analog_0, joystick_l_analog_1;
-wire  [8:0] spinner_0, spinner_1;
+wire [31:0] joystick_0, joystick_1, joystick_2, joystick_3;
+wire        gun_game;    // the set has the gun: shows the OSD's H2 page
+wire [15:0] joystick_l_analog_0, joystick_l_analog_1, joystick_l_analog_2;
+wire [15:0] joystick_r_analog_0;
+wire  [8:0] spinner_0, spinner_1, spinner_2;
 wire [24:0] ps2_mouse;
 
 wire        ioctl_download, ioctl_upload, ioctl_wr;
@@ -106,14 +116,19 @@ hps_io #(.CONF_STR(CONF_STR)) hps_io
 
 	.buttons(buttons),
 	.status(status),
-	.status_menumask({14'd0, direct_video, 1'b0}),
+	.status_menumask({13'd0, ~gun_game, direct_video, 1'b0}),
 
 	.joystick_0(joystick_0),
 	.joystick_1(joystick_1),
+	.joystick_2(joystick_2),
+	.joystick_3(joystick_3),
 	.joystick_l_analog_0(joystick_l_analog_0),
 	.joystick_l_analog_1(joystick_l_analog_1),
+	.joystick_l_analog_2(joystick_l_analog_2),
+	.joystick_r_analog_0(joystick_r_analog_0),
 	.spinner_0(spinner_0),
 	.spinner_1(spinner_1),
+	.spinner_2(spinner_2),
 	.ps2_mouse(ps2_mouse),
 
 	.ioctl_download(ioctl_download),
@@ -211,14 +226,22 @@ end
 wire [3:0] core_r, core_g, core_b;
 wire       core_hs, core_vs, core_hb, core_vb, core_ce;
 
+// Player 1's right analog stick past half deflection, as joystick bits 14-17
+// (R, L, D, U), the same bits the "R ..." buttons set.
+wire signed [7:0] rs_x = joystick_r_analog_0[7:0], rs_y = joystick_r_analog_0[15:8];
+wire [31:0] joy0 = joystick_0 | {14'd0, rs_y < -8'sd64, rs_y > 8'sd64, rs_x < -8'sd64, rs_x > 8'sd64, 14'd0};
+
 balsente_core u_core (
 	.clk(clk_sys), .raster_rst_n(pll_locked), .rst_n(~core_reset),
 	.dl_wr(ioctl_wr && ioctl_index == 16'd0), .dl_addr(ioctl_addr[18:0]), .dl_data(ioctl_dout),
 	.nv_ext_we(nv_dl && ioctl_wr), .nv_ext_addr(ioctl_addr[8:0]), .nv_ext_din(ioctl_dout[3:0]),
 	.nv_ext_q(nv_q), .nv_cpu_wr(nv_cpu_wr),
-	.joystick_0(joystick_0), .joystick_1(joystick_1), .dips(dips[31:0]), .pause(pause_cpu), .flip(flip),
+	.joystick_0(joy0), .joystick_1(joystick_1), .joystick_2(joystick_2), .joystick_3(joystick_3),
+	.dips(dips[31:0]), .pause(pause_cpu), .flip(flip),
+	.gun_mode(status[8:7]), .crosshair_off(status[9]), .gun_game(gun_game),
 	.ps2_mouse(ps2_mouse), .stick0(joystick_l_analog_0), .stick1(joystick_l_analog_1),
-	.spinner0(spinner_0), .spinner1(spinner_1),
+	.stick2(joystick_l_analog_2),
+	.spinner0(spinner_0), .spinner1(spinner_1), .spinner2(spinner_2),
 	.r(core_r), .g(core_g), .b(core_b),
 	.hsync(core_hs), .vsync(core_vs), .hblank(core_hb), .vblank(core_vb),
 	.ce_pix(core_ce),

@@ -526,4 +526,12 @@ running it in MAME and looking.
     dial and analog-stick inputs. `sim/adc_tb` replays MAME's selects and reads with the ports
     held at known values: 0 mismatches over minigolf (shift 2, 810 reads), snakepit (shift 1,
     2,383), sfootbal and stocker (shift 0, 4,886 and 931). `sim/analog_tb` checks the MiSTer
-    device mapping. Remaining: teamht, grudge, spiker, rescraid, stompin, nstocker, shrike.
+    device mapping.
+14. Phase 4: teamht, grudge(i, p), spiker(a, b), rescraid(a), stompin(a), nstocker(a), each on
+    a board-variant byte (rtl/main_bus.sv). In `sim/board_tb` from blank NOVRAM, video RAM and
+    palette at frame 600 equal MAME's for all six; rescraid's and stompin's sprite lists too, the
+    others differing only in work RAM at 0x80-0x8e by where in the frame each side dumps.
+    Under a fixed input schedule (`scripts/mame_input_trace.py`) the main CPU's reads match MAME's
+    once aligned: grudge 453, nstocker 524, stompin 1,983, teamht 2,255, with differences only in
+    the frames the schedule steps, and one more in teamht, its first read of 0x9404 at boot (0x00
+    against MAME's 0xBF). Remaining: shrike.

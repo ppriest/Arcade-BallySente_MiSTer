@@ -23,6 +23,8 @@
 //   +wlog=<file>               the main board's output writes
 //   +iolog=<file>              the 6VB's I/O accesses, as sim/calib_tb logs them
 //   +acialog=<file>            the main CPU's writes to its 6850, as sndtrace.lua logs them
+//   +insched=<mode> +inlog=<file>   inputs on inputtrace.lua's schedule, and the
+//                              reads they are compared on (mame_input_trace.py)
 //   +rxlog=<file>              the sound CPU's reads of its 6850, status and data, likewise
 //   +ramlog=<file> +ramfrom=<s> +ramto=<s>   the sound CPU's RAM writes in that window
 //   +pclog=<file>              with +ramfrom/+ramto: the sound CPU's opcode fetches in it
@@ -55,12 +57,31 @@ module tb_board #(
     int target;
     string image_file, outdir;
 
+    // +insched=<mode>: drive the inputs on scripts/mame/inputtrace.lua's
+    // schedule; +inlog=<file>: log the CPU's reads of that mode's register.
+    // Modes: grudge (the wheels), gun, teamht, stompin (the pads).
+    int          inmode = 0, inlog = 0;
+    logic [15:0] in_addr = '0;
+    logic [7:0]  w0_s = '0, w1_s = '0, w2_s = '0, gun_x_s = 8'h80, gun_y_s = 8'h80;
+    function automatic logic [3:0] tdirs(input logic [3:0] b);
+        tdirs = {b[0], b[1], b[3], b[2]};
+    endfunction
+    always @* if (inmode == 1) begin
+        force dut.wheel0 = w0_s; force dut.wheel1 = w1_s; force dut.wheel2 = w2_s;
+    end
+    always @* if (inmode == 2) begin
+        force dut.gun_x = gun_x_s; force dut.gun_y = gun_y_s;
+    end
+
     balsente_core #(.OPEN_BUS(OPEN_BUS)) dut (
         .clk(clk), .raster_rst_n(1'b1), .rst_n(rst_n),
         .dl_wr(dl_wr), .dl_addr(dl_addr), .dl_data(dl_data),
         .nv_ext_we(1'b0), .nv_ext_addr(9'd0), .nv_ext_din(4'd0), .nv_ext_q(), .nv_cpu_wr(),
-        .joystick_0(joy0), .joystick_1(32'd0), .dips(dips), .pause(1'b0), .flip(1'b0),
-        .ps2_mouse(25'd0), .stick0(16'd0), .stick1(16'd0), .spinner0(9'd0), .spinner1(9'd0),
+        .joystick_0(joy0), .joystick_1(joy1), .joystick_2(joy2), .joystick_3(joy3),
+        .dips(dips), .pause(1'b0), .flip(1'b0),
+        .gun_mode(2'd0), .crosshair_off(1'b0), .gun_game(),
+        .ps2_mouse(25'd0), .stick0(16'd0), .stick1(16'd0), .stick2(16'd0),
+        .spinner0(9'd0), .spinner1(9'd0), .spinner2(9'd0),
         .r(r), .g(g), .b(b),
         .hsync(hsync), .vsync(vsync), .hblank(hblank), .vblank(vblank),
         .ce_pix(ce_pix),
@@ -75,7 +96,7 @@ module tb_board #(
     // the audio unit's saturating parameter-overrun and late-tick counters.
     wire               audio_en;
     wire signed [15:0] audio;
-    logic [31:0]       joy0 = '0;
+    logic [31:0]       joy0 = '0, joy1 = '0, joy2 = '0, joy3 = '0;
     int                acialog = 0, rxlog = 0, ramlog = 0, pclog = 0;
     logic [15:0]       last_m1 = '0;
     logic              m1_prev = 1'b1;
@@ -86,6 +107,39 @@ module tb_board #(
     always_ff @(posedge clk) begin
         joy0[9] <= coin_at >= 0 && frame >= coin_at && frame < coin_at + 6;
         joy0[8] <= coin_at >= 0 && frame >= coin_at + 90 && frame < coin_at + 96;
+        if (inmode != 0) begin
+            // scripts/mame/inputtrace.lua's schedule, step k = frame / 8
+            int k;
+            k = frame / 8;
+            case (inmode)
+                2: begin gun_x_s <= 8'(k * 37); gun_y_s <= 8'(k * 53 + 17); end
+                3: begin
+                    // bits of (k*5 + p*3) & 15 are Up, Down, Right, Left; the
+                    // joystick's are 0 R, 1 L, 2 D, 3 U
+                    joy0[3:0] <= tdirs(4'(k * 5));
+                    joy1[3:0] <= tdirs(4'(k * 5 + 3));
+                    joy2[3:0] <= tdirs(4'(k * 5 + 6));
+                    joy3[3:0] <= tdirs(4'(k * 5 + 9));
+                end
+                4: case (k % 9)
+                    1: joy0[3:0] <= 4'b1001;   // top-right: U R
+                    2: joy0[3:0] <= 4'b1000;   // top
+                    3: joy0[3:0] <= 4'b1010;   // top-left: U L
+                    4: joy0[3:0] <= 4'b0001;   // right
+                    5: joy0[3:0] <= 4'b0010;   // left
+                    6: joy0[3:0] <= 4'b0101;   // bottom-right: D R
+                    7: joy0[3:0] <= 4'b0100;   // bottom
+                    8: joy0[3:0] <= 4'b0110;   // bottom-left: D L
+                    default: joy0[3:0] <= 4'b0000;
+                endcase
+                default: ;
+            endcase
+            if (inmode == 1) begin
+                w0_s <= 8'(k * 23); w1_s <= 8'(k * 23 + 57); w2_s <= 8'(k * 23 + 114);
+            end
+        end
+        if (inlog != 0 && dut.running && cen_E && cpu_rnw && cpu_addr == in_addr)
+            $fwrite(inlog, "r %0d %02X\n", frame, dut.u_main.u_bus.dout);
         if (acialog != 0 && dut.running && cen_E && !cpu_rnw && cpu_addr[15:1] == 15'h4d02)
             $fwrite(acialog, "%.9f\t%04X\t%02X\n", real'(acyc) / 40.0e6, cpu_addr, dut.u_main.DOut);
         if (dut.u_snd.mem_rd_start && !dut.u_snd.m1_n) last_m1 <= dut.u_snd.addr;
@@ -227,6 +281,14 @@ module tb_board #(
         if (!$value$plusargs("out=%s", outdir))       outdir = "debug/cshift-board";
         if (!$value$plusargs("frame=%d", target))     target = 1200;
         void'($value$plusargs("coin=%d", coin_at));
+        begin
+            string m;
+            if ($value$plusargs("insched=%s", m)) begin
+                inmode  = (m == "grudge") ? 1 : (m == "gun") ? 2 : (m == "teamht") ? 3 : 4;
+                in_addr = (m == "gun") ? 16'h9902 : (m == "teamht") ? 16'h9404 : 16'h9400;
+            end
+            if ($value$plusargs("inlog=%s", m)) inlog = $fopen(m, "w");
+        end
         // cshift's .mra default; MAME ran its own defaults for the reference.
         if (!$value$plusargs("dips=%h", dips))        dips = 32'hffff7fff;
 
@@ -274,6 +336,7 @@ module tb_board #(
         if (wlog != 0) $fclose(wlog);
         if (iolog != 0) $fclose(iolog);
         if (acialog != 0) $fclose(acialog);
+        if (inlog != 0) $fclose(inlog);
         if (rxlog != 0) $fclose(rxlog);
         if (ramlog != 0) $fclose(ramlog);
         if (pclog != 0) $fclose(pclog);

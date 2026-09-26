@@ -33,6 +33,7 @@ module game_board #(
     input  logic [5:0]  cfg_cdmask,
     input  logic        cfg_swap,
     input  logic        cfg_banks16,
+    input  logic [2:0]  cfg_variant,   // main_bus.sv; 5 is Night Stocker's gun
 
     // Program ROM, 128 or 256 KB
     output logic [17:0] prg_addr,
@@ -62,6 +63,12 @@ module game_board #(
     input  logic [7:0]  an0, an1, an2, an3,
     input  logic [1:0]  adc_shift,
     input  logic        adc_raw,
+
+    // teamht's input groups; Grudge Match's three wheel positions; Night
+    // Stocker's gun position (MAME's FAKEX/FAKEY, 0x80 at the centre)
+    input  logic [7:0]  ex0, ex1, ex2, ex3,
+    input  logic [7:0]  wheel0, wheel1, wheel2,
+    input  logic [7:0]  gun_x, gun_y,
 
     // The NOVRAMs from outside, for the save file: address bit 8 picks the
     // chip (0 system, 1 cartridge). nv_cpu_wr pulses on every CPU write.
@@ -137,38 +144,86 @@ module game_board #(
     wire        cs_ram, cs_vram, cs_pal, cs_rom;
     wire [1:0]  palbank;
     wire [7:0]  outlatch;
-    wire        nvram_recall, nv0_sel, nv1_sel, nv_we;
+    wire        nvram_recall, nv0_sel, nv1_sel, nv_we, nv_8bit;
     wire [7:0]  nv_addr;
 
-    // The NOVRAMs are two X2212s, 256 nibbles each, held as one array: the
-    // top level reads and writes it through nv_ext_* for the .nvm file.
+    // The NOVRAMs are two X2212s, 256 nibbles each, one array per chip so
+    // rescraid can write both in a cycle (novram_8bit_w). The top level reads
+    // and writes them through nv_ext_* for the .nvm file, bit 8 picking the chip.
     // A blank X2212 reads 0xF in every nibble (MAME x2212.cpp nvram_default).
     // Not a don't-care: cshift computes values from it on its first boot, and
     // starting at 0 changes what it writes back (sim/board_tb, write #6973).
     // SRAM and EEPROM are one array here and recall is not wired (docs/HACKS.md).
-    logic [3:0] nv [0:511];
-    initial for (int i = 0; i < 512; i++) nv[i] = 4'hf;
-    wire [8:0]  nv_cpu_a = {nv1_sel, nv_addr};
-    wire [7:0]  nv_q = (nv0_sel || nv1_sel) ? {4'h0, nv[nv_cpu_a]} : 8'h00;
-    assign nv_cpu_wr = nv_we && (nv0_sel || nv1_sel);
+    logic [3:0] nva [0:255], nvb [0:255];
+    initial for (int i = 0; i < 256; i++) begin nva[i] = 4'hf; nvb[i] = 4'hf; end
+    wire [7:0]  nv_q = nv_8bit ? {nvb[nv_addr], nva[nv_addr]}
+                     : nv0_sel ? {4'h0, nva[nv_addr]}
+                     : nv1_sel ? {4'h0, nvb[nv_addr]} : 8'h00;
+    assign nv_cpu_wr = nv_we;
+    wire wa = nv_we && nv0_sel;
+    wire wb = nv_we && (nv1_sel || (nv_8bit && nv0_sel));
     // The outside writes only while the CPU is held in reset (the .nvm load).
     always_ff @(posedge clk) begin
-        if (nv_ext_we)      nv[nv_ext_addr] <= nv_ext_din;
-        else if (nv_cpu_wr) nv[nv_cpu_a]    <= DOut[3:0];
+        if (nv_ext_we && !nv_ext_addr[8]) nva[nv_ext_addr[7:0]] <= nv_ext_din;
+        else if (wa)                      nva[nv_addr] <= DOut[3:0];
     end
-    assign nv_ext_q = nv[nv_ext_addr];
+    always_ff @(posedge clk) begin
+        if (nv_ext_we && nv_ext_addr[8])  nvb[nv_ext_addr[7:0]] <= nv_ext_din;
+        else if (wb)                      nvb[nv_addr] <= nv_8bit ? DOut[7:4] : DOut[3:0];
+    end
+    assign nv_ext_q = nv_ext_addr[8] ? nvb[nv_ext_addr[7:0]] : nva[nv_ext_addr[7:0]];
+
+    // ---------------------------------------------------------- variants
+    wire        irq_tick;
+    wire [8:0]  irq_line;
+    wire [7:0]  steer_q;
+    wire        steer_rd;
+    grudge_steering u_steer (
+        .clk(clk), .rst_n(rst_n), .tick(irq_tick), .rd(steer_rd),
+        .wheel0(wheel0), .wheel1(wheel1), .wheel2(wheel2), .q(steer_q)
+    );
+
+    // interrupt_timer()'s shooter branch: the gun is latched at the line-64
+    // interrupt, and each interrupt presents two bits of X and two of Y,
+    // shifted one further each time. Line 0 (once, after reset) presents 0:
+    // MAME shifts by -1 there.
+    logic [7:0] sh_x, sh_y;
+    logic [3:0] gun_bits;
+    always_ff @(posedge clk or negedge rst_n) begin
+        logic [7:0] tx, ty;
+        if (!rst_n) begin
+            sh_x <= 8'h80; sh_y <= 8'h80; gun_bits <= '0;
+        end else if (irq_tick) begin
+            if (irq_line == 9'd64) begin sh_x <= gun_x; sh_y <= gun_y; end
+            tx = (irq_line == 9'd64) ? gun_x : sh_x;
+            ty = (irq_line == 9'd64) ? gun_y : sh_y;
+            case (irq_line)
+                9'd64:   ;
+                9'd128:  begin tx = tx << 1; ty = ty << 1; end
+                9'd192:  begin tx = tx << 2; ty = ty << 2; end
+                9'd256:  begin tx = tx << 3; ty = ty << 3; end
+                default: begin tx = '0;      ty = '0;      end
+            endcase
+            // ((x >> 4) & 8) | ((x >> 1) & 4) | ((y >> 6) & 2) | ((y >> 3) & 1)
+            gun_bits <= {tx[7], tx[3], ty[7], ty[3]};
+        end
+    end
+    wire [7:0] in0_eff = (cfg_variant == 3'd5) ? {in_in0[7:4], gun_bits} : in_in0;
 
     main_bus #(.OPEN_BUS(OPEN_BUS)) u_bus (
         .clk(clk), .rst_n(rst_n), .cen_E(cen_E),
         .addr(ADDR), .rnw(RnW), .din(DOut), .cpu_d(D), .dout(bus_q),
         .cs_ram(cs_ram), .cs_vram(cs_vram), .cs_pal(cs_pal),
         .cfg_cdmask(cfg_cdmask), .cfg_swap(cfg_swap), .cfg_banks16(cfg_banks16),
+        .cfg_variant(cfg_variant),
         .rom_addr(prg_addr), .rom_q(prg_q), .cs_rom(cs_rom),
         .palbank(palbank), .outlatch(outlatch), .nvram_recall(nvram_recall),
-        .in_swh(in_swh), .in_swg(in_swg), .in_in0(in_in0), .in_in1(in_in1),
+        .in_swh(in_swh), .in_swg(in_swg), .in_in0(in0_eff), .in_in1(in_in1),
         .vblank(vblank),
         .nv_addr(nv_addr), .nv0_sel(nv0_sel), .nv1_sel(nv1_sel),
-        .nv_we(nv_we), .nv_q(nv_q),
+        .nv_we(nv_we), .nv_q(nv_q), .nv_8bit(nv_8bit),
+        .ex0(ex0), .ex1(ex1), .ex2(ex2), .ex3(ex3),
+        .steer_q(steer_q), .steer_rd(steer_rd),
         .adc_sel(adc_sel), .adc_start(adc_start), .adc_q(adc_q),
         .acia_sel(acia_sel), .acia_we(), .acia_q(acia_q),
         .watchdog_kick()
@@ -284,7 +339,8 @@ module game_board #(
     // instance would be a second thing to keep in step for no gain.
     irq_timer u_irq (
         .clk(clk), .rst_n(rst_n),
-        .hcnt(vid_h), .vcnt(vid_v), .irq(irq)
+        .hcnt(vid_h), .vcnt(vid_v), .irq(irq),
+        .tick(irq_tick), .tick_line(irq_line)
     );
 
 endmodule

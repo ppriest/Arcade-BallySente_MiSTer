@@ -16,6 +16,9 @@ set_global_assignment -name SYSTEMVERILOG_FILE rtl/game_board.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/main_bus.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/adc.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/analog_inputs.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/grudge_steering.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/grudge_wheels.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/lightgun.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/irq_timer.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/acia6850.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/video/video.sv

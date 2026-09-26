@@ -15,7 +15,8 @@
 //   0x52000  configuration, 32 bytes: 0 expand_roms() mask, 1 flags
 //            (bit 0 SWAP_HALVES, bit 1 256 KB maincpu), 2-5 the analog ports'
 //            descriptors (rtl/analog_inputs.sv), 6 the ADC (bits 1:0 shift,
-//            bit 7 raw), 16-31 the input map
+//            bit 7 raw), 7 the board variant (rtl/main_bus.sv; 5 the gun),
+//            16-31 the input map
 //
 // Configuration survives reset: MiSTer holds reset for the whole download.
 //
@@ -44,14 +45,19 @@ module balsente_core #(
 
     input  logic [31:0] joystick_0,
     input  logic [31:0] joystick_1,
+    input  logic [31:0] joystick_2,     // players 3 and 4: teamht, grudge
+    input  logic [31:0] joystick_3,
     input  logic [31:0] dips,           // <switches> bytes: SWH, SWG, IN0, IN1
 
     // Analog controls, as hps_io presents them
     input  logic [24:0] ps2_mouse,
-    input  logic [15:0] stick0, stick1,
-    input  logic [8:0]  spinner0, spinner1,
+    input  logic [15:0] stick0, stick1, stick2,
+    input  logic [8:0]  spinner0, spinner1, spinner2,
     input  logic        pause,
     input  logic        flip,
+    input  logic [1:0]  gun_mode,       // lightgun.sv: 0 Auto, 1 Aim, 2 D-pad
+    input  logic        crosshair_off,
+    output logic        gun_game,       // this set has the gun (cfg byte 7 is 5)
 
     output logic [3:0]  r,
     output logic [3:0]  g,
@@ -108,23 +114,40 @@ module balsente_core #(
     always_ff @(posedge clk) if (dl_cfg) cfg[dl_addr[4:0]] <= dl_data;
 
     // ------------------------------------------------------------- inputs
+    // 0x00-0x7f joysticks 0 and 1 (bit 5 the player, bit 6 active high),
+    // 0x80 a DIP, 0xa0-0xbf / 0xc0-0xdf joystick 2 / 3 active low, 0xfe/0xff 0/1.
     function automatic logic port_bit(input logic [7:0] m, input logic [31:0] j0,
-                                      input logic [31:0] j1, input logic dip);
+                                      input logic [31:0] j1, input logic [31:0] j2,
+                                      input logic [31:0] j3, input logic dip);
         logic v;
         if (m == 8'hff)      return 1'b1;
         if (m == 8'hfe)      return 1'b0;
         if (m == 8'h80)      return dip;
+        if (m[7:5] == 3'b101) return ~j2[m[4:0]];
+        if (m[7:5] == 3'b110) return ~j3[m[4:0]];
         v = m[5] ? j1[m[4:0]] : j0[m[4:0]];
         return m[6] ? v : ~v;
     endfunction
 
+    // Night Stocker's trigger is also the left mouse button.
+    wire v_gun = cfg[7][2:0] == 3'd5;
+    assign gun_game = v_gun;
+
     logic [7:0] in0, in1;
     always_ff @(posedge clk) begin
         for (int i = 0; i < 8; i++) begin
-            in0[i] <= port_bit(cfg[16 + i], joystick_0, joystick_1, dips[16 + i]);
-            in1[i] <= port_bit(cfg[24 + i], joystick_0, joystick_1, dips[24 + i]);
+            in0[i] <= port_bit(cfg[16 + i], joystick_0, joystick_1, joystick_2, joystick_3, dips[16 + i]);
+            in1[i] <= port_bit(cfg[24 + i], joystick_0, joystick_1, joystick_2, joystick_3, dips[24 + i]);
         end
+        if (v_gun && ps2_mouse[0]) in1[1] <= 1'b0;
     end
+
+    // teamht's input groups (EX0-EX3): the four players' joysticks in bits
+    // 7:4, active low; players 3 and 4 sit opposite, so theirs are reversed.
+    function automatic logic [7:0] ex(input logic [31:0] j, input logic rev);
+        // joystick bits: 0 R, 1 L, 2 D, 3 U
+        ex = rev ? ~{j[0], j[1], j[3], j[2], 4'h0} : ~{j[1], j[0], j[2], j[3], 4'h0};
+    endfunction
 
     // -------------------------------------------------------------- reset
     // The raster runs through reset, so the display keeps its sync while the
@@ -147,18 +170,40 @@ module balsente_core #(
     analog_inputs u_analog (
         .clk(clk), .rst_n(running), .vblank(vblank),
         .port_cfg({cfg[5], cfg[4], cfg[3], cfg[2]}),
-        .ps2_mouse(ps2_mouse), .stick0(stick0), .stick1(stick1),
-        .dpad0(joystick_0[3:0]), .dpad1(joystick_1[3:0]),
+        // On the gun set the d-pad and left stick aim, so its dial takes the
+        // spinner and the right stick's left/right (joystick bits 15, 14).
+        .ps2_mouse(ps2_mouse), .stick0(v_gun ? 16'd0 : stick0), .stick1(stick1),
+        .dpad0(v_gun ? {2'b00, joystick_0[15:14]} : joystick_0[3:0]), .dpad1(joystick_1[3:0]),
         .spinner0(spinner0), .spinner1(spinner1),
         .an0(an0), .an1(an1), .an2(an2), .an3(an3)
+    );
+
+    wire [7:0] wheel0, wheel1, wheel2;
+    grudge_wheels u_wheels (
+        .clk(clk), .rst_n(running), .hblank(hblank), .ps2_mouse(ps2_mouse),
+        .spinner0(spinner0), .spinner1(spinner1), .spinner2(spinner2),
+        .dpad0(joystick_0[3:0]), .dpad1(joystick_1[3:0]), .dpad2(joystick_2[3:0]),
+        .stick0_x(stick0[7:0]), .stick1_x(stick1[7:0]), .stick2_x(stick2[7:0]),
+        .wheel0(wheel0), .wheel1(wheel1), .wheel2(wheel2)
+    );
+
+    wire [7:0] gun_x, gun_y;
+    wire       crosshair;
+    lightgun u_gun (
+        .clk(clk), .rst_n(running), .vblank(vblank), .ps2_mouse(ps2_mouse),
+        .stick(stick0), .dpad(joystick_0[3:0]), .mode(gun_mode),
+        .flip(flip), .hpos(hpos), .vpos(vpos),
+        .gun_x(gun_x), .gun_y(gun_y), .crosshair(crosshair)
     );
 
     // ------------------------------------------------------------- boards
     wire uart_clk, main_txd, snd_txd;
 
+    wire [3:0] br, bg, bb;
     game_board #(.OPEN_BUS(OPEN_BUS)) u_main (
         .clk(clk), .rst_n(running), .raster_rst_n(raster_rst_n),
         .cfg_cdmask(cfg[0][5:0]), .cfg_swap(cfg[1][0]), .cfg_banks16(cfg[1][1]),
+        .cfg_variant(cfg[7][2:0]),
         .prg_addr(prg_addr), .prg_q(prg_q),
         .gfx_addr(gfx_addr), .gfx_q(gfx_q),
         .in_swh(dips[7:0]), .in_swg(dips[15:8]), .in_in0(in0), .in_in1(in1),
@@ -166,14 +211,24 @@ module balsente_core #(
         .pause(pause), .flip(flip),
         .an0(an0), .an1(an1), .an2(an2), .an3(an3),
         .adc_shift(cfg[6][1:0]), .adc_raw(cfg[6][7]),
+        .ex0(ex(joystick_0, 1'b0)), .ex1(ex(joystick_1, 1'b0)),
+        .ex2(ex(joystick_2, 1'b1)), .ex3(ex(joystick_3, 1'b1)),
+        .wheel0(wheel0), .wheel1(wheel1), .wheel2(wheel2),
+        .gun_x(gun_x), .gun_y(gun_y),
         .nv_ext_we(nv_ext_we), .nv_ext_addr(nv_ext_addr), .nv_ext_din(nv_ext_din),
         .nv_ext_q(nv_ext_q), .nv_cpu_wr(nv_cpu_wr),
-        .r(r), .g(g), .b(b),
+        .r(br), .g(bg), .b(bb),
         .hsync(hsync), .vsync(vsync), .hblank(hblank), .vblank(vblank),
         .ce_pix(ce_pix),
         .cpu_addr(cpu_addr), .cpu_rnw(cpu_rnw), .cen_E(cen_E),
         .hpos(hpos), .vpos(vpos)
     );
+
+    // The gun's crosshair over the picture
+    wire show_cross = v_gun && !crosshair_off && crosshair;
+    assign r = show_cross ? 4'hf : br;
+    assign g = show_cross ? 4'hf : bg;
+    assign b = show_cross ? 4'hf : bb;
 
     wire signed [15:0] snd_audio;
     sente6vb u_snd (

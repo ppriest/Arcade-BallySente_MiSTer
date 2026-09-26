@@ -19,6 +19,12 @@
 //   9f00       w  second ROM bank (st1002)
 //   a000-ffff  banked cartridge ROM
 //
+// Some cartridges change the map (`cfg_variant`, balsente.cpp cpu1_*_map):
+//   1 teamht    9000-9007 w selects an input group, 9404 r reads it; no ADC
+//   2 grudge    9400 r is the steering register, not the ADC
+//   3 spiker    9f80-9f8f rw the pixel-expand helper
+//   4 rescraid  9b00-9bff rw both NOVRAMs as one byte; 9c00-9cff unmapped
+//
 // RAM, video RAM and the palette are NOT here: they are dual-ported and shared
 // with the video engine, so the top level owns them and this module only says
 // when they are selected. The board races the beam and the CPU writes them
@@ -57,6 +63,7 @@ module main_bus #(
     input  logic [5:0]  cfg_cdmask,    // expand_roms() low 6 bits
     input  logic        cfg_swap,      // SWAP_HALVES
     input  logic        cfg_banks16,   // a 256 KB maincpu region
+    input  logic [2:0]  cfg_variant,   // see the header
 
     output logic [17:0] rom_addr,      // into the program ROM region
     input  logic [7:0]  rom_q,
@@ -82,6 +89,14 @@ module main_bus #(
     output logic        nv1_sel,
     output logic        nv_we,
     input  logic [7:0]  nv_q,
+    output logic        nv_8bit,       // rescraid: nv_q is both chips, and a write goes to both
+
+    // teamht's four input groups (EX0-EX3), active low as read
+    input  logic [7:0]  ex0, ex1, ex2, ex3,
+
+    // grudge's steering register (grudge_steering.sv); rd pulses on a read
+    input  logic [7:0]  steer_q,
+    output logic        steer_rd,
 
     // ADC. The top level presents the selected channel.
     output logic [2:0]  adc_sel,
@@ -126,15 +141,55 @@ module main_bus #(
     wire sel_nv1    = in_io && (addr[11:8]  == 4'hc);                    // 9c00-9cff
     wire sel_bank2  = in_io && (addr[11:0]  == 12'hf00);                 // 9f00
 
+    localparam logic [2:0] V_TEAMHT = 3'd1, V_GRUDGE = 3'd2, V_SPIKER = 3'd3, V_RESCRAID = 3'd4;
+    wire v_teamht   = cfg_variant == V_TEAMHT;
+    wire v_grudge   = cfg_variant == V_GRUDGE;
+    wire v_spiker   = cfg_variant == V_SPIKER;
+    wire v_rescraid = cfg_variant == V_RESCRAID;
+    wire sel_tmux_r = v_teamht && in_io && (addr[11:0] == 12'h404);      // 9404
+    wire sel_expand = v_spiker && in_io && (addr[11:4] == 8'hf8);        // 9f80-9f8f
+
     assign watchdog_kick = wr && sel_wdog;
     assign nv_addr  = addr[7:0];
     assign nv0_sel  = sel_nv0;
-    assign nv1_sel  = sel_nv1;
-    assign nv_we    = wr && (sel_nv0 || sel_nv1);
+    assign nv1_sel  = sel_nv1 && !v_rescraid;
+    assign nv_we    = wr && (sel_nv0 || nv1_sel);
+    assign nv_8bit  = v_rescraid;
     assign adc_sel  = addr[2:0];
-    assign adc_start = wr && sel_adc_w;
+    assign adc_start = wr && sel_adc_w && !v_teamht;
+    assign steer_rd = cen_E && rnw && v_grudge && sel_adc_r;
     assign acia_sel = sel_acia;
     assign acia_we  = wr && sel_acia;
+
+    // ------------------------------------------------------------ variants
+    // teamht_multiplex_select_w: offsets 4-7 load an input group into the
+    // latch 9404 reads; 0-3 leave it (MAME logs them as unhandled).
+    // spiker_expand_w/_r: a bit pattern, a colour and a background colour; each
+    // read rotates both nibbles of the pattern left, returns two pixels, and
+    // clears the background colour.
+    logic [7:0] tmux, sp_bits, sp_bg, sp_color;
+    wire  [7:0] sp_rot = {sp_bits[6:4], sp_bits[7], sp_bits[2:0], sp_bits[3]};
+    wire  [7:0] sp_q   = {(sp_rot[4] ? sp_color[7:4] : sp_bg[7:4]),
+                          (sp_rot[0] ? sp_color[3:0] : sp_bg[3:0])};
+
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            tmux <= '0; sp_bits <= '0; sp_bg <= '0; sp_color <= '0;
+        end else if (cen_E) begin
+            if (!rnw && v_teamht && sel_adc_w && addr[2])
+                tmux <= (addr[1:0] == 2'd0) ? ex0 : (addr[1:0] == 2'd1) ? ex1
+                      : (addr[1:0] == 2'd2) ? ex2 : ex3;
+            if (!rnw && sel_expand) begin
+                if (addr[3:0] == 4'd0) sp_bits  <= din;
+                if (addr[3:0] == 4'd1) sp_bg    <= din;
+                if (addr[3:0] == 4'd2) sp_color <= din;
+            end
+            if (rnw && sel_expand) begin
+                sp_bits <= sp_rot;
+                sp_bg   <= '0;
+            end
+        end
+    end
 
     // ------------------------------------------------------------ registers
     logic [3:0] bank_ab;
@@ -259,10 +314,14 @@ module main_bus #(
                                   : (addr[1:0] == 2'd1) ? in_swg
                                   : (addr[1:0] == 2'd2) ? in_in0
                                                         : {vblank, in_in1[6:0]};
-        // The X2212s drive four bits; the top half of the byte floats.
-        else if (sel_nv0 || sel_nv1) dout = {floatv[7:4], nv_q[3:0]};
+        // The X2212s drive four bits; the top half of the byte floats, except
+        // on rescraid, which reads both chips as one byte at 9b00.
+        else if (sel_nv0 && v_rescraid) dout = nv_q;
+        else if (sel_nv0 || nv1_sel) dout = {floatv[7:4], nv_q[3:0]};
         else if (sel_acia)   dout = acia_q;
-        else if (sel_adc_r)  dout = adc_q;
+        else if (sel_tmux_r) dout = tmux;
+        else if (sel_expand) dout = sp_q;
+        else if (sel_adc_r)  dout = v_grudge ? steer_q : adc_q;
     end
 
 endmodule

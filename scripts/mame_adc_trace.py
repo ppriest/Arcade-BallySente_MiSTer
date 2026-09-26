@@ -62,7 +62,7 @@ def main():
     trace = out / a.game / f"{a.game}_adc.trace"
     check(trace, r)
     text = build_mra.driver_text()
-    adc = build_mra.adc_config(text, build_mra.game_line(text, a.game)["init"])
+    adc, _ = build_mra.adc_config(text, build_mra.game_line(text, a.game)["init"])
     vec = vectors(trace, adc)
     path = out / f"{a.game}_adc.vec"
     path.write_text("\n".join(vec) + "\n")

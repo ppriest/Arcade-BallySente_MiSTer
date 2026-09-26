@@ -28,7 +28,9 @@ THE INDEX-0 IMAGE, which rtl/balsente_core.sv decodes:
                1      bit 0 SWAP_HALVES, bit 1 a 256 KB maincpu region
                2-5    AN0-AN3 descriptors (rtl/analog_inputs.sv)
                6      ADC: bits 1:0 the shift, bit 7 raw (rtl/adc.sv)
-               7-15   0
+               7      board variant (rtl/main_bus.sv): 1 teamht, 2 grudge,
+                      3 spiker, 4 rescraid, 5 the gun (nstocker)
+               8-15   0
                16-23  IN0 bits 0-7, one map byte each
                24-31  IN1 bits 0-7 (bit 7 is VBLANK, from the board)
 
@@ -37,11 +39,15 @@ A map byte says where a port bit comes from:
     0x20-0x3f   joystick_1 bit n
     +0x40       active high instead
     0x80        a DIP: the same bit of <switches> byte 2 (IN0) or 3 (IN1)
+    0xa0-0xbf   joystick_2 bit n, active low
+    0xc0-0xdf   joystick_3 bit n, active low
     0xfe / 0xff constant 0 / 1
 
 Joystick bits are the core's CONF_STR J1 line: 0 R, 1 L, 2 D, 3 U, 4-7
 buttons 1-4, 8 Start, 9 Coin, 10 Service, 11 Pause, 12 Start 3, 13 Start 4
-(on player 1's controller: those sets pick the player count on one panel).
+(on player 1's controller: those sets pick the player count on one panel),
+14-17 the right stick R, L, D, U (rescraid). A set with third and fourth
+players' controls (teamht, grudge) takes theirs from joysticks 2 and 3.
 <switches> bytes are SWH (0x9900), SWG (0x9901), the DIP bits of IN0 and IN1, then a fifth byte
 the board never sees: bit 0 is the fake Flip Screen DIP (BallySente.sv), since
 no set has a flip of its own.
@@ -64,18 +70,21 @@ import mra                                        # noqa: E402
 
 PHASE2 = ["sentetst", "cshift", "hattrick", "toggle", "gghost"]
 
-# Every set the RTL runs. Left out until their hardware is written: teamht
-# (input multiplexer), grudge* (steering), spiker* (expand helper), rescraid*
-# (NOVRAM variant), stompin/stompina (pads), nstocker* (light gun), shrike
-# (68000), triviaes4/5 (other hardware).
+# Every set the RTL runs. Left out: shrike (68000), triviaes4/5 (other hardware).
 RUNNABLE = PHASE2 + ["otwalls", "snakepit", "snakepita", "snakjack", "stocker",
                      "triviag1", "triviag1a", "triviabb", "triviag2", "triviayp",
                      "triviasp", "triviaes", "triviaes2", "gimeabrk", "minigolf",
                      "minigolfa", "minigolfb", "minigolfct", "sfootbal", "nametune",
-                     "nametunea"]
+                     "nametunea", "teamht", "grudge", "grudgei", "grudgep", "spiker",
+                     "spikera", "spikerb", "rescraid", "rescraida", "stompin", "stompina",
+                     "nstocker", "nstockera"]
 
 ANALOG_KIND = {"TRACKBALL_X": 1, "TRACKBALL_Y": 2, "DIAL": 3, "AD_STICK_X": 4,
-               "AD_STICK_Y": 5}
+               "AD_STICK_Y": 5, "PADS": 6}
+
+# Configuration byte 7, the board variant (rtl/main_bus.sv), by MACHINE_CONFIG;
+# 5, the light gun, comes from config_shooter_adc(true, ...) instead.
+VARIANT = {"teamht": 1, "grudge": 2, "spiker": 3, "rescraid": 4}
 
 PRG_SIZE, GFX_SIZE, SND_SIZE = 0x40000, 0x10000, 0x2000
 GFX_BASE, SND_BASE, CFG_BASE = 0x40000, 0x50000, 0x52000
@@ -84,32 +93,40 @@ IMAGE_SIZE = CFG_BASE + 32
 SND_ZIP, SND_ROM, SND_CRC = "sente6vb.zip", "8002-10 9-25-84.5", "4dd0a525"
 
 DIP_BYTE = {":SWH": 0, ":SWG": 1, ":IN0": 2, ":IN1": 3}
-J1 = "J1,Button 1,Button 2,Button 3,Button 4,Start,Coin,Service,Pause"
+J1 = "J1,Button 1,Button 2,Button 3,Button 4,Start,Coin,Service,Pause,Start 3,Start 4,R Right,R Left,R Down,R Up"
 JOY = {"RIGHT": 0, "LEFT": 1, "DOWN": 2, "UP": 3}
+# Joystick bits past Pause, as CONF_STR's J1 line names them
+EXTRA_BITS = {12: "Start 3", 13: "Start 4", 14: "R Right", 15: "R Left", 16: "R Down", 17: "R Up"}
 OSD_COLS = 28
 
 # The game's own names for its buttons, keyed by set; a clone takes its
 # parent's. Entry N names MAME's BUTTON(N+1), so keep the order and count; an
 # empty list or a missing set keeps "Button N".
 BUTTON_NAMES = {
-    "cshift":   ["Blue Things", "Red Things"],              # Chicken Shift
-    "snakjack": ["Blow"],                                   # Snacks'n Jaxson
+    "cshift":   ["Blue", "Red"],                            # Chicken Shift
+    "snakjack": ["Sneeze"],                                 # Snacks'n Jaxson
     "hattrick": ["Shoot"],                                  # Hat Trick
     "toggle":   ["Shoot"],                                  # Toggle
     "gghost":   ["Jump", "Button 2"],                       # Goalie Ghost
     "otwalls":  [],                                         # Off the Wall (dials only)
     "snakepit": ["Whip"],                                   # Snake Pit
     "stocker":  ["Gas"],                                    # Stocker
-    "triviag1": ["Incorrect", "Correct"],                   # Trivial Pursuit (Genus)
-    "triviabb": ["Incorrect", "Correct"],                   # Trivial Pursuit (Baby Boomer)
-    "triviag2": ["Incorrect", "Correct"],                   # Trivial Pursuit (Genus II)
-    "triviayp": ["Incorrect", "Correct"],                   # Trivial Pursuit (Young Players)
-    "triviasp": ["Incorrect", "Correct"],                   # Trivial Pursuit (All Star Sports)
-    "triviaes": ["Incorrect", "Correct"],                   # Trivial Pursuit (Spanish)
+    "triviag1": ["Green", "Red"],                           # Trivial Pursuit (Genus)
+    "triviabb": ["Green", "Red"],                           # Trivial Pursuit (Baby Boomer)
+    "triviag2": ["Green", "Red"],                           # Trivial Pursuit (Genus II)
+    "triviayp": ["Green", "Red"],                           # Trivial Pursuit (Young Players)
+    "triviasp": ["Green", "Red"],                           # Trivial Pursuit (All Star Sports)
+    "triviaes": ["Green", "Red"],                           # Trivial Pursuit (Spanish)
     "gimeabrk": ["Position Cue Ball"],                      # Gimme A Break
     "minigolf": ["Tee Select"],                             # Mini Golf
-    "sfootbal": ["Jump/Spike"],                             # Street Football
-    "nametune": ["1", "2", "3", "4"],  # Name That Tune
+    "sfootbal": ["Pass/Player"],                            # Street Football
+    "nametune": ["1", "2", "3", "4"],                       # Name That Tune
+    "teamht":   ["Shoot"],                                  # Team Hat Trick
+    "grudge":   ["Button 1"],                               # Grudge Match
+    "spiker":   ["Jump/Spike"],                             # Spiker
+    "rescraid": ["Select Weapons"],                         # Rescue Raider (plus the right stick)
+    "stompin":  ["Zapper"],                                 # Stompin' (the pads are the d-pad)
+    "nstocker": ["Trigger"],                                # Night Stocker (the trigger)
     "sentetst": ["Button 1"],                               # Sente Diagnostic Cartridge
 }
 
@@ -201,8 +218,13 @@ def analog_ports(text, inp):
             if "UNUSED_ANALOG" in ln:
                 ports_[cur] = None
                 continue
+            # Stompin: buttons in the analog ports' top bits, one pad row each
+            if re.search(r"IPT_BUTTON\d", ln) and "PORT_BIT" in ln:
+                ports_[cur] = ("PADS", int(cur[2]), False, False)
+                continue
             k = re.search(r"IPT_(\w+)", ln)
-            if k and "PORT_BIT" in ln:
+            if k and "PORT_BIT" in ln and not (k.group(1) == "UNUSED" and
+                                               ports_.get(cur) and ports_[cur][0] == "PADS"):
                 if k.group(1) == "UNUSED":
                     ports_[cur] = None
                 else:
@@ -232,15 +254,13 @@ def analog_bytes(ports_):
 
 def adc_config(text, init):
     """config_shooter_adc(shooter, shift): the ADC byte, bits 1:0 the shift,
-    bit 7 raw for MAME's shift of 32."""
+    bit 7 raw for MAME's shift of 32; and whether the set has the gun."""
     m = re.search(r"void balsente_state::" + re.escape(init) +
                   r"\(\)\s*\{[^}]*config_shooter_adc\(\s*(true|false)\s*,\s*(\d+)", text)
     if not m:
-        return 0
-    if m.group(1) == "true":
-        sys.exit(f"{init}: a light-gun set; its shooter logic is not wired")
+        return 0, False
     shift = int(m.group(2))
-    return 0x80 if shift == 32 else shift
+    return (0x80 if shift == 32 else shift), m.group(1) == "true"
 
 
 def cart_config(text, init):
@@ -257,6 +277,22 @@ def cart_config(text, init):
 
 
 # ------------------------------------------------------------------ ROMs
+def region_size(game, region):
+    """The ROM_REGION's declared size."""
+    m = re.search(r'ROM_REGION\(\s*(0x[0-9a-fA-F]+)\s*,\s*"' + region + '"',
+                  blocks(driver_text())[game])
+    return int(m.group(1), 16)
+
+
+def gfx_parts(game):
+    """The sprite region, repeated to fill 64 KB when it is smaller: MAME masks
+    sprite addresses with the region's size (balsente_v.cpp m_sprite_mask), so
+    a 32 KB region mirrors."""
+    size = region_size(game, "gfx1")
+    parts, _ = region_parts(game, "gfx1", min(size, GFX_SIZE))
+    return parts * max(1, GFX_SIZE // size)
+
+
 def region_parts(game, region, size):
     """<part> elements for one region: every load at its offset, gaps 0x00."""
     text = driver_text()
@@ -277,7 +313,26 @@ def region_parts(game, region, size):
             pieces.append((dest, cur[0], cur[1], 0, length))
         else:
             sys.exit(f"{game} {region}: record {kind} is not handled")
-    pieces.sort()
+    # A later load overwrites an earlier one where they overlap, as MAME loads
+    # them in order: grudgei's GM-6A replaces the last 8 KB of GM-2A, and
+    # grudge's CD12 all of CD4 (the same data). An earlier piece is cut to what
+    # is left of it.
+    kept = []
+    for p in pieces:
+        lo, hi = p[0], p[0] + p[4]
+        nxt = []
+        for q in kept:
+            qlo, qhi = q[0], q[0] + q[4]
+            if qhi <= lo or qlo >= hi:
+                nxt.append(q)
+                continue
+            if qlo < lo:
+                nxt.append((qlo, q[1], q[2], q[3], lo - qlo))
+            if qhi > hi:
+                nxt.append((hi, q[1], q[2], q[3] + (hi - qlo), qhi - hi))
+        kept = nxt + [p]
+    loadlen = {q[1]: q[4] for q in pieces if q[3] == 0}
+    pieces = sorted(kept)
     out, pos = [], 0
     for dest, name, crc, foff, length in pieces:
         if dest < pos:
@@ -285,7 +340,8 @@ def region_parts(game, region, size):
         if dest > pos:
             out.append(f'<part repeat="{dest - pos:#x}">00</part>')
         attrs = f'name="{name}" crc="{crc:08x}"'
-        whole = sum(1 for p in pieces if p[1] == name) == 1
+        whole = (sum(1 for p in pieces if p[1] == name) == 1 and foff == 0
+                 and length == loadlen.get(name))
         if not whole:
             attrs += f' offset="{foff:#x}" length="{length:#x}"'
         out.append(f"<part {attrs}/>")
@@ -299,10 +355,15 @@ def region_parts(game, region, size):
 
 # ---------------------------------------------------------------- inputs
 def input_map(fields):
-    """16 map bytes for IN0 and IN1, and the buttons the set uses."""
+    """16 map bytes for IN0 and IN1, the number of buttons the set uses, and
+    which joystick bits past Pause (EXTRA_BITS) it uses."""
     m = {}
     used = {0: set(), 1: set()}
-    starts = set()
+    extras = set()
+    toks = {tok for tag, _, _, tok in fields if tag in (":IN0", ":IN1")}
+    # A set with a third player's controls has its own Start and Coin for them;
+    # otherwise START3/4 are the player-count buttons on player 1's controller.
+    three = any(t.startswith(("P3_", "P4_")) or t == "COIN3" for t in toks)
     for tag, mask, dflt, tok in fields:
         if tag not in (":IN0", ":IN1"):
             continue
@@ -313,25 +374,31 @@ def input_map(fields):
             key = (port, b)
             high = 0x40 if not dflt >> b & 1 else 0
             code = None
-            j = re.fullmatch(r"P([12])_JOYSTICK(?:LEFT)?_(UP|DOWN|LEFT|RIGHT)", tok)
-            bt = re.fullmatch(r"P([12])_BUTTON([1-4])", tok)
+            j = re.fullmatch(r"P([1-4])_JOYSTICK(?:LEFT)?_(UP|DOWN|LEFT|RIGHT)", tok)
+            jr = re.fullmatch(r"P1_JOYSTICKRIGHT_(UP|DOWN|LEFT|RIGHT)", tok)
+            bt = re.fullmatch(r"P([1-4])_BUTTON([1-4])", tok)
+            st = re.fullmatch(r"(START|COIN)([1-4])", tok)
             if j:
-                code = (0x20 if j.group(1) == "2" else 0) + JOY[j.group(2)] + high
+                code = player_code(int(j.group(1)), JOY[j.group(2)], high, tok)
+            elif jr:
+                code = 14 + JOY[jr.group(1)] + high
+                extras.add(14 + JOY[jr.group(1)])
             elif bt:
-                pl = int(bt.group(1)) - 1
-                code = pl * 0x20 + 3 + int(bt.group(2)) + high
-                used[pl].add(int(bt.group(2)))
-            elif tok in ("START1", "START2"):
-                code = (0x20 if tok == "START2" else 0) + 8 + high
+                pl = int(bt.group(1))
+                code = player_code(pl, 3 + int(bt.group(2)), high, tok)
+                if pl <= 2:
+                    used[pl - 1].add(int(bt.group(2)))
+            elif st and (three or st.group(2) in "12"):
+                code = player_code(int(st.group(2)), 8 if st.group(1) == "START" else 9, high, tok)
             elif tok in ("START3", "START4"):
                 code = (12 if tok == "START3" else 13) + high
-                starts.add(tok)
-            elif tok in ("COIN1", "COIN2"):
-                code = (0x20 if tok == "COIN2" else 0) + 9 + high
+                extras.add(12 if tok == "START3" else 13)
             elif tok == "SERVICE1":
                 code = 10 + high
             elif tok == "DIPSWITCH":
                 code = 0x80
+            elif tok == "CUSTOM":
+                code = 0xff          # Night Stocker's gun bits: rtl/game_board.sv
             elif tok in ("UNUSED", "UNKNOWN", "TILT", "SPECIAL") or tok.startswith("TYPE_OTHER"):
                 code = 0xfe if high else 0xff
             else:
@@ -340,7 +407,16 @@ def input_map(fields):
                 sys.exit(f"input {tag} bit {b}: two fields ({m[key]:#x}, {code:#x})")
             m[key] = code
     out = bytes(m.get((p, b), 0xff) for p in (0, 1) for b in range(8))
-    return out, max(max(used[0], default=0), max(used[1], default=0)), sorted(starts)
+    return out, max(max(used[0], default=0), max(used[1], default=0)), extras
+
+
+def player_code(pl, bit, high, tok):
+    """Map byte for joystick bit `bit` of player `pl` (1-4)."""
+    if pl <= 2:
+        return (0x20 if pl == 2 else 0) + bit + high
+    if high:
+        sys.exit(f"{tok}: an active-high input for player {pl} has no encoding")
+    return (0xa0 if pl == 3 else 0xc0) + bit
 
 
 # ------------------------------------------------------------------ DIPs
@@ -400,22 +476,39 @@ def build(game, refresh):
 
     cdmask, swap = cart_config(text, g["init"])
     prg, prg_len = region_parts(game, "maincpu", PRG_SIZE)
-    gfx, _ = region_parts(game, "gfx1", GFX_SIZE)
+    gfx = gfx_parts(game)
     banks16 = prg_len > 0x20000
 
-    imap, nbuttons, starts = input_map(fields)
-    an = analog_bytes(analog_ports(text, g["inp"]))
-    cfg = bytes([cdmask, (1 if swap else 0) | (2 if banks16 else 0), *an,
-                 adc_config(text, g["init"])]) + bytes(9) + imap
+    imap, nbuttons, extras = input_map(fields)
+    adc, shooter = adc_config(text, g["init"])
+    variant = 5 if shooter else VARIANT.get(g["machine"], 0)
+    aports = analog_ports(text, g["inp"])
+    if variant == 2:
+        # Grudge Match's dials are read through the steering register
+        # (grudge_wheels.sv), not the ADC.
+        aports = [None] * 4
+    nomouse = [False] * 4
+    if variant == 5:
+        # Night Stocker's dial is player 2's in MAME only to keep it off the
+        # crosshair's controls; here it is player 1's, without the mouse.
+        for i, p in enumerate(aports):
+            if p and p[0] == "DIAL":
+                aports[i] = (p[0], 0, p[2], p[3])
+                nomouse[i] = True
+    an = [b | (4 if nm else 0) for b, nm in zip(analog_bytes(aports), nomouse)]
+    cfg = bytes([cdmask, (1 if swap else 0) | (2 if banks16 else 0), *an, adc,
+                 variant]) + bytes(8) + imap
     default, dips = dip_xml(machine)
 
     names = BUTTON_NAMES.get(game) or BUTTON_NAMES.get(g["parent"] or "") or \
         [f"Button {i + 1}" for i in range(nbuttons)]
     names = list(names) + ["-"] * (4 - len(names))
-    extra = "".join(",Start " + t[-1] for t in starts)
+    # Joystick bits past Pause (11) that the set uses, named in CONF_STR's order
+    top = max(extras, default=11)
+    extra = "".join("," + (EXTRA_BITS[b] if b in extras else "-") for b in range(12, top + 1))
     zips = "|".join([f"{game}.zip"] + ([f"{g['parent']}.zip"] if g["parent"] else []) + [SND_ZIP])
     rot = {"ROT0": "horizontal", "ROT90": "vertical (cw)", "ROT270": "vertical (ccw)"}[g["rot"]]
-    analog = [p for p in analog_ports(text, g["inp"]) if p]
+    analog = [p for p in aports if p]
     players = machine.find("input").get("players") if machine.find("input") is not None else "1"
 
     ind = "\t\t"
@@ -471,7 +564,8 @@ def check_image(game, path, cfg, parent=None):
                 break
     img = mra.build_image(str(path), zips, IMAGE_SIZE)
     prg = region(game, "maincpu", zips=own)
-    want = prg + bytes(PRG_SIZE - len(prg)) + region(game, "gfx1", zips=own)
+    gfx = region(game, "gfx1", zips=own)
+    want = prg + bytes(PRG_SIZE - len(prg)) + bytes(gfx) * max(1, GFX_SIZE // len(gfx))
     with zipfile.ZipFile(zips[-1]) as z:
         want += z.read(SND_ROM)
     want += cfg

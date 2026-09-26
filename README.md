@@ -8,7 +8,6 @@ A MiSTer FPGA core for Bally/Sente's SAC-I arcade hardware (MAME's
 - [History](#history)
 - [Games](#games)
   - [Supported](#supported)
-  - [Not yet](#not-yet)
   - [Out of scope for now](#out-of-scope-for-now)
 - [Hardware](#hardware)
   - [Video timing](#video-timing)
@@ -26,6 +25,11 @@ A MiSTer FPGA core for Bally/Sente's SAC-I arcade hardware (MAME's
 - [License](#license)
 
 ## History
+
+**BallySente_20260927.rbf**
+- Beta release
+- Adds Team Hat Trick, Grudge Match, Spiker, Rescue Raider, Stompin' and Night Stocker (light gun,
+  with a crosshair). Not yet played on hardware except Night Stocker's attract mode.
 
 **BallySente_20260926.rbf**
 - Beta release
@@ -57,19 +61,12 @@ Sets with an `.mra` in `releases/` (clones in `releases/_alternatives/`). Chicke
 | Toggle (prototype) | 1985 | Bally/Sente | joystick, one button, two players | |
 | Trivial Pursuit (Genus 2/12/85 and 12/14/84; Baby Boomer; Genus II; Young Players; All Star Sports; Volumen II and III, Spanish) | 1984-1987 | Bally/Sente | joystick, two buttons; Start 1-4 pick the players | |
 | Sente Diagnostic Cartridge | 1984 | Bally/Sente | joystick, one button, trackball | the board's own self-test |
-
-### Not yet
-
-In-scope sets the RTL can run but that have no `.mra` yet, and the ones that need more RTL.
-
-| Name | Why |
-|-|-|
-| teamht | the input multiplexer at 0x9000 is not yet implemented |
-| grudge, grudgei, grudgep | three steering wheels at 0x9400 are not yet implemented |
-| nstocker, nstockera | the light gun is not yet implemented |
-| stompin, stompina | the foot pads are not yet implemented |
-| spiker, spikera, spikerb | the pixel-expand helper at 0x9f80 is not yet implemented |
-| rescraid, rescraida | the 8-bit NOVRAM variant is not yet implemented |
+| Team Hat Trick (11/16/84) | 1984 | Bally/Sente | joystick, one button, four players | players 3 and 4 on the third and fourth controllers |
+| Grudge Match (v00.90; Italy; v00.80) | 1987 | Bally/Sente | steering wheel, one button, three players | wheels from the mouse, spinners, d-pads or sticks |
+| Spiker (6/9/86; 5/5/86; earliest) | 1986 | Bally/Sente | trackball, one button, two players | |
+| Rescue Raider (5/11/87 and stand-alone) | 1987 | Bally/Sente | two joysticks, one button | the right stick, or R Right/Left/Down/Up |
+| Stompin' (4/4/86 and prototype) | 1986 | Bally/Sente | eight foot pads, one button | the pads are the d-pad's eight directions |
+| Night Stocker (10/6/86 and 8/27/86) | 1986 | Bally/Sente | light gun, dial, one button | gun from the mouse, d-pad or left stick, with a crosshair |
 
 ### Out of scope for now
 
@@ -125,15 +122,82 @@ there is no PCB measurement. The core runs on a 40 MHz clock with a 1-in-8 pixel
 
 ### Chicken Shift
 
-![cshift title](docs/screenshots/cshift/title.png)
+![cshift 20260926_213735-screen](docs/screenshots/cshift/20260926_213735-screen.png)
+![cshift 20260926_213742-screen](docs/screenshots/cshift/20260926_213742-screen.png)
+![cshift 20260926_214045-screen](docs/screenshots/cshift/20260926_214045-screen.png)
+![cshift 20260926_214113-screen](docs/screenshots/cshift/20260926_214113-screen.png)
 
-![cshift instructions, native resolution](docs/screenshots/cshift/instructions_native.png)
+### Gimme A Break
+
+![gimeabrk 20260926_214217-screen](docs/screenshots/gimeabrk/20260926_214217-screen.png)
+![gimeabrk 20260926_214202-screen](docs/screenshots/gimeabrk/20260926_214202-screen.png)
+
+### Goalie Ghost
+
+![gghost 20260926_214242-screen](docs/screenshots/gghost/20260926_214242-screen.png)
+![gghost 20260926_214323-screen](docs/screenshots/gghost/20260926_214323-screen.png)
+
+### Hat Trick
+
+![hattrick 20260926_214343-screen](docs/screenshots/hattrick/20260926_214343-screen.png)
+![hattrick 20260926_214416-screen](docs/screenshots/hattrick/20260926_214416-screen.png)
+
+### Mini Golf
+
+![minigolf 20260926_214603-screen](docs/screenshots/minigolf/20260926_214603-screen.png)
+![minigolf 20260926_214623-screen](docs/screenshots/minigolf/20260926_214623-screen.png)
+
+### Name That Tune
+
+![nametune 20260926_214735-screen](docs/screenshots/nametune/20260926_214735-screen.png)
+![nametune 20260926_214758-screen](docs/screenshots/nametune/20260926_214758-screen.png)
+![nametune 20260926_214802-screen](docs/screenshots/nametune/20260926_214802-screen.png)
+![nametune 20260926_214903-screen](docs/screenshots/nametune/20260926_214903-screen.png)
+
+### Off the Wall
+
+![otwalls 20260926_214940-screen](docs/screenshots/otwalls/20260926_214940-screen.png)
+![otwalls 20260926_215034-screen](docs/screenshots/otwalls/20260926_215034-screen.png)
+
+### Snacks'n Jaxson
+
+![snakjack 20260926_215155-screen](docs/screenshots/snakjack/20260926_215155-screen.png)
+![snakjack 20260926_215112-screen](docs/screenshots/snakjack/20260926_215112-screen.png)
+![snakjack 20260926_215140-screen](docs/screenshots/snakjack/20260926_215140-screen.png)
+
+### Snake Pit
+
+![snakepit 20260926_215219-screen](docs/screenshots/snakepit/20260926_215219-screen.png)
+![snakepit 20260926_215305-screen](docs/screenshots/snakepit/20260926_215305-screen.png)
+![snakepit 20260926_215327-screen](docs/screenshots/snakepit/20260926_215327-screen.png)
+
+### Stocker
+
+![stocker 20260926_215357-screen](docs/screenshots/stocker/20260926_215357-screen.png)
+![stocker 20260926_215410-screen](docs/screenshots/stocker/20260926_215410-screen.png)
+
+### Street Football
+
+![sfootbal 20260926_215452-screen](docs/screenshots/sfootbal/20260926_215452-screen.png)
+![sfootbal 20260926_215515-screen](docs/screenshots/sfootbal/20260926_215515-screen.png)
+![sfootbal 20260926_215536-screen](docs/screenshots/sfootbal/20260926_215536-screen.png)
+
+### Toggle
+
+![toggle 20260926_215717-screen](docs/screenshots/toggle/20260926_215717-screen.png)
+![toggle 20260926_215629-screen](docs/screenshots/toggle/20260926_215629-screen.png)
+![toggle 20260926_215655-screen](docs/screenshots/toggle/20260926_215655-screen.png)
+
+### Trivial Pursuit (Genus Edition)
+
+![triviag1 20260926_215740-screen](docs/screenshots/triviag1/20260926_215740-screen.png)
+![triviag1 20260926_215801-screen](docs/screenshots/triviag1/20260926_215801-screen.png)
 
 ## Installation
 
 No SDRAM module is needed.
 
-Copy `releases/Arcade-BallySente_20260926.rbf` to `_Arcade/cores` and `releases/*.mra` (with
+Copy `releases/Arcade-BallySente_20260927.rbf` to `_Arcade/cores` and `releases/*.mra` (with
 `_alternatives/`) to `_Arcade/_BallySente`. To run a development build instead:
 `python scripts/build_staged.py`, then `python scripts/deploy.py` with a `mister.env` (see
 `scripts/deploy.py`). That copies the core to `_Arcade/cores` and the `.mra` files to
@@ -151,7 +215,13 @@ Copy `releases/Arcade-BallySente_20260926.rbf` to `_Arcade/cores` and `releases/
   half the speed of MAME's default keys) or left analog stick, moving at a rate set by how far it is pushed;
   dials also from the spinner. Street
   Football's sticks are the controllers' left analog sticks.
-- Grudge Match's wheels, Night Stocker's gun and Stompin's pads are not wired yet.
+- Night Stocker's gun: the mouse (left button is also the trigger), the d-pad (two units a
+  frame) or the left stick (aims directly; OSD "Gun stick": Auto, Aim, D-pad, as the Seta core's
+  Zombie Raid). Its dial is the spinner or the right stick's left/right. OSD "Crosshair" hides the crosshair.
+- Grudge Match's wheels: player 1's from the mouse; each player's from its spinner, d-pad or
+  left stick.
+- Stompin's eight pads are the d-pad's eight directions.
+- Team Hat Trick and Grudge Match take players 3 and 4 from the third and fourth controllers.
 
 ## Status
 
@@ -174,8 +244,9 @@ progress; `docs/LESSONS_LEARNED.md` is what it cost.
 * Flip screen, HDMI and analog, from the OSD or the DIP (fake DIP where the game has none): done
   (a fake DIP: no set has a flip)
 * HDMI-only options hidden under direct video: done
-* Peripheral menus shown only for games that use them: n/a -- the analog controls have no OSD settings
-* Light guns: mouse, analog stick and synthetic crosshair, where used: not yet (Night Stocker)
+* Peripheral menus shown only for games that use them: done -- the gun page appears only for Night Stocker
+* Light guns: mouse, analog stick and synthetic crosshair, where used: done (Night Stocker),
+  not yet tried on hardware
 * Audio mix (Mono, None, 25%, 50%): done
 * Hiscore saving (`hiscore.v`, with autosave): n/a — the games keep their own tables in NOVRAM,
   saved below
@@ -187,18 +258,18 @@ progress; `docs/LESSONS_LEARNED.md` is what it cost.
 ### Todo
 
 - [ ] Try the analog-control sets on hardware
-- [ ] Grudge Match's wheels, Night Stocker's light gun, Stompin's pads
+- [ ] Try Team Hat Trick, Grudge Match, Spiker, Rescue Raider, Stompin' and Night Stocker on hardware
 - [ ] CRT Adjust
-- [ ] teamht's multiplexer, spiker's expand helper, rescraid's NOVRAM variant
 
 ### Resource usage
 
-Release 20260926 (commit 0c55505, seed 2), revision `BallySente`, on the DE10-nano's Cyclone V
-5CSEBA6, speed grade 7, `clk_sys` setup slack +4.101 ns at 40 MHz:
+Release 20260927 (commit d8397c2, seed 2), revision `BallySente`, on the DE10-nano's Cyclone V
+5CSEBA6, speed grade 7, `clk_sys` setup slack +2.856 ns at 40 MHz; every clock positive, worst
+setup +0.692 ns (HDMI PLL), worst hold +0.227 ns:
 
 | resource | used | available |
 | --- | --- | --- |
-| Logic (ALMs) | 25,404 | 41,910 |
+| Logic (ALMs) | 26,189 | 41,910 |
 | Block memory bits | 3,913,023 | 5,662,720 |
 | RAM blocks | 501 | 553 |
 | DSP blocks | 92 | 112 |

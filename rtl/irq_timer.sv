@@ -25,7 +25,11 @@ module irq_timer #(
     input  logic       rst_n,
     input  logic [8:0] hcnt,
     input  logic [8:0] vcnt,
-    output logic       irq          // active high; the CPU input is inverted
+    output logic       irq,         // active high; the CPU input is inverted
+    // One clock as it fires, with its line: interrupt_timer()'s `param`, which
+    // Grudge Match's steering and Night Stocker's gun act on.
+    output logic       tick,
+    output logic [8:0] tick_line
 );
 
     logic [8:0] next_line;
@@ -36,9 +40,14 @@ module irq_timer #(
             next_line <= 9'd0;       // the first one is scanline 0
             armed     <= 1'b0;
             irq       <= 1'b0;
+            tick      <= 1'b0;
+            tick_line <= '0;
         end else begin
+            tick <= 1'b0;
             if (vcnt == next_line && hcnt == 9'd0 && !armed) begin
                 irq       <= 1'b1;
+                tick      <= 1'b1;
+                tick_line <= next_line;
                 armed     <= 1'b1;
                 next_line <= (next_line == VBSTART) ? 9'd64 : next_line + 9'd64;
             end

@@ -10,7 +10,9 @@
 //   [6]    half: MAME sensitivity 50 rather than 100
 //   [5:3]  kind   0 none (reads 0)   1 trackball X   2 trackball Y
 //                 3 dial             4 stick X       5 stick Y
-//   [1:0]  player
+//                 6 Stompin's pads, three to a port, from player 1's d-pad
+//   [2]    not from the mouse (Night Stocker's dial: the mouse is the gun)
+//   [1:0]  player; for kind 6 the pad row, 0 top, 1 middle, 2 bottom
 //
 // Trackballs and dials are relative (MAME's PORT_RESET): the movement since the
 // last frame, clamped to a signed byte. Player 1's comes from the mouse; any
@@ -61,16 +63,31 @@ module analog_inputs (
         input logic signed [15:0] mx, my, sp0, sp1, input logic [15:0] j0, j1,
         input logic [3:0] d0, d1);
         logic signed [15:0] v;
+        logic signed [15:0] mxx, myy;
         logic [15:0] j;
         logic [3:0]  d;
         logic [1:0]  pl;
+        logic        u, dn, l, r;
         pl = c[1:0];
         j  = (pl == 2'd0) ? j0 : (pl == 2'd1) ? j1 : 16'd0;
         d  = (pl == 2'd0) ? d0 : (pl == 2'd1) ? d1 : 4'd0;
+        mxx = c[2] ? 16'sd0 : mx;
+        myy = c[2] ? 16'sd0 : my;
+        // Stompin: the eight pads are the d-pad's eight directions. Each port
+        // carries three, active low in bits 7:5, the rest reading 1.
+        {u, dn, l, r} = d0;
+        if (c[5:3] == 3'd6) begin
+            case (pl)
+                2'd0:    port_value = {~(u && l), ~(u && !l && !r), ~(u && r), 5'h1f};
+                2'd1:    port_value = {~(l && !u && !dn), 1'b1, ~(r && !u && !dn), 5'h1f};
+                default: port_value = {~(dn && l), ~(dn && !l && !r), ~(dn && r), 5'h1f};
+            endcase
+            return port_value;
+        end
         case (c[5:3])
-            3'd1: v = ((pl == 2'd0) ? mx : 16'sd0) + rate(j[7:0]) + keys(d[0], d[1]);
-            3'd2: v = ((pl == 2'd0) ? my : 16'sd0) + rate(j[15:8]) + keys(d[2], d[3]);
-            3'd3: v = ((pl == 2'd0) ? mx + sp0 : (pl == 2'd1) ? sp1 : 16'sd0) + rate(j[7:0])
+            3'd1: v = ((pl == 2'd0) ? mxx : 16'sd0) + rate(j[7:0]) + keys(d[0], d[1]);
+            3'd2: v = ((pl == 2'd0) ? myy : 16'sd0) + rate(j[15:8]) + keys(d[2], d[3]);
+            3'd3: v = ((pl == 2'd0) ? mxx + sp0 : (pl == 2'd1) ? sp1 : 16'sd0) + rate(j[7:0])
                       + keys(d[0], d[1]);
             3'd4: v = 16'(signed'(j[7:0]));
             3'd5: v = 16'(signed'(j[15:8]));

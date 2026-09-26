@@ -9,6 +9,9 @@ rtl/acia6850.sv
 rtl/main_bus.sv
 rtl/adc.sv
 rtl/analog_inputs.sv
+rtl/grudge_steering.sv
+rtl/grudge_wheels.sv
+rtl/lightgun.sv
 rtl/game_board.sv
 rtl/sound/pit8253.sv
 rtl/sound/sente6vb_io.sv

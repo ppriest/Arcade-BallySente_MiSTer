@@ -161,9 +161,21 @@ def main():
 
     cfg_dir = out / "cfg"
     write_crosshair_off(cfg_dir, a.set)
+    # NOVRAM starts blank, as the RTL's does, unless an image is pinned in
+    # debug/<set>-nvram/<set>/ (mame_boot_trace.py). MAME's own nvram folder
+    # keeps whatever an earlier run of the set left there.
+    nv_dir = out / "nvram"
+    if nv_dir.exists():
+        shutil.rmtree(nv_dir)
+    pinned = REPO / "debug" / f"{a.set}-nvram" / a.set
+    if pinned.is_dir():
+        shutil.copytree(pinned, nv_dir / a.set)
+    else:
+        nv_dir.mkdir()
     cmd = mame_cmd(exe, a.set, "capture.lua", mame_dir,
                    ["-seconds_to_run", str(seconds),
-                    "-cfg_directory", str(cfg_dir)])
+                    "-cfg_directory", str(cfg_dir),
+                    "-nvram_directory", str(nv_dir)])
     env = dict(os.environ, **lua_env(r), **lua_runner_env("capture.lua"),
                CORE_OUT=out.as_posix(), CORE_FRAME=str(a.frame),
                CORE_READ=spec(r.get("read", {})), CORE_WTAP=spec(r.get("wtap", {})),
