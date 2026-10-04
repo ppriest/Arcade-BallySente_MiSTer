@@ -62,7 +62,8 @@ them.
 Run for every published `.rbf` (`docs/RELEASE_PROCESS.md`, step 4):
 
 - [ ] Every vendored directory has a current `PROVENANCE.md` (`sys/` is covered by this file).
-- [ ] Every vendored file changed here carries a change notice: `rtl/cpu/t80/T80.vhd`.
+- [ ] Every vendored file changed here carries a change notice: `rtl/cpu/t80/T80.vhd`,
+      `rtl/cpu/fx68k/verilator/fx68k.sv`.
 - [ ] `sys/` is unmodified: `git log -- sys` shows only the initial commit.
 - [ ] No open licence question. The mc6809i fork's licence is recorded above; either reading is
       GPL-3.0-compatible.
