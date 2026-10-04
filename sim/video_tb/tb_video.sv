@@ -176,18 +176,15 @@ module tb_video;
     end
 
 
-    // The palette bank the DUT sees. It follows the line being FETCHED, not the
-    // one being displayed: the core looks the palette up one pixel ahead, so
-    // pixel 0 of a line is coloured during the last pixel of the previous one.
-    // Indexing this by the displayed line gave pixel (0,0) of every frame the
-    // previous line's bank -- one wrong pixel a frame, and the only failure in
-    // the first run of this bench.
-    int fetch_line;
+    // The palette bank register as the CPU leaves it. palbank.txt is the bank
+    // each visible row SHOWS, which (render_model.py, MAME) is the register as
+    // it stood 16 raster lines before the row: row r shows the register at
+    // raster line r. The core applies that 16-line delay itself
+    // (rtl/video/video.sv), so during raster line X the register is row X's.
     always_comb begin
-        fetch_line = (mh == HTOTAL - 1) ? mv + 1 : mv;
         palbank = 2'd0;
-        if (fetch_line >= VBEND && fetch_line < VBEND + HEIGHT)
-            palbank = 2'(bank_of[fetch_line - VBEND]);
+        if (mv < HEIGHT) palbank = 2'(bank_of[mv]);
+        else             palbank = 2'(bank_of[HEIGHT - 1]);
     end
 
     // Apply writes when the mirrored beam reaches them, during the measured

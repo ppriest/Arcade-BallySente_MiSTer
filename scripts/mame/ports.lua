@@ -20,8 +20,8 @@ emu.register_frame_done(function()
             local tok = ""
             local ok, t = pcall(function() return io_:input_type_to_token(f.type, f.player) end)
             if ok and t then tok = t end
-            out:write(string.format("%s\t%d\t%d\t%s\t%s\t%s\n", tag, f.mask, f.defvalue,
-                tok, f.name or "", f.is_analog and "analog" or ""))
+            out:write(string.format("%s\t%d\t%d\t%s\t%s\t%s\t%s\n", tag, f.mask, f.defvalue,
+                tok, f.name or "", f.is_analog and "analog" or "", f.toggle and "toggle" or ""))
         end
     end
     out:close()

@@ -10,7 +10,9 @@
 // is shifted left by the game's `adc_shift`, pushed 8 further from zero ("most
 // games seem to have a dead zone in the middle"), and clipped to 255. With
 // `raw` (MAME's shift of 32, Stompin' and Shrike) the channel reads its port
-// directly. A read of 0x9400 returns the last result.
+// directly; `raw_ob` makes that port offset binary, 0x80 at rest, as Shrike
+// Avenger's stick is (MAME AD_STICK with a default of 0x80), where the ports
+// here are signed. A read of 0x9400 returns the last result.
 
 module adc (
     input  logic        clk,
@@ -20,6 +22,7 @@ module adc (
     input  logic [7:0]  an0, an1, an2, an3,   // signed
     input  logic [1:0]  shift,
     input  logic        raw,
+    input  logic        raw_ob,
     output logic [7:0]  q
 );
 
@@ -49,7 +52,7 @@ module adc (
             else begin
                 busy <= 1'b0;
                 if (raw) begin
-                    q <= ch[2] ? 8'h00 : pick(ch[1:0], an0, an1, an2, an3);
+                    q <= ch[2] ? 8'h00 : (pick(ch[1:0], an0, an1, an2, an3) ^ {raw_ob, 7'd0});
                 end else begin
                     v = 16'(signed'(pick(ch[2:1], an0, an1, an2, an3))) <<< shift;
                     if (v < 0)      v = v - 16'sd8;

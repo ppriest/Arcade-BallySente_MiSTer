@@ -13,10 +13,15 @@
 //   0x40000  gfx1, 64 KB
 //   0x50000  the 6VB's ROM, 8 KB
 //   0x52000  configuration, 32 bytes: 0 expand_roms() mask, 1 flags
-//            (bit 0 SWAP_HALVES, bit 1 256 KB maincpu), 2-5 the analog ports'
+//            (bit 0 SWAP_HALVES, bit 1 256 KB maincpu, bit 2 the second ROM
+//            bank at 9F00), 2-5 the analog ports'
 //            descriptors (rtl/analog_inputs.sv), 6 the ADC (bits 1:0 shift,
-//            bit 7 raw), 7 the board variant (rtl/main_bus.sv; 5 the gun),
+//            bit 7 raw, bit 6 raw ports offset binary), 7 the board variant (rtl/main_bus.sv; 5 the gun),
 //            16-31 the input map
+//   0x54000  Shrike Avenger's 68000 program, 16 KB: savgu22 (even bytes)
+//            then savgu24 (odd). Shrike's second 64 KB of sprites is at
+//            0x20000, the upper half of the program region its 128 KB of
+//            program leaves free.
 //
 // Configuration survives reset: MiSTer holds reset for the whole download.
 //
@@ -86,8 +91,8 @@ module balsente_core #(
     wire dl_gfx = dl_wr && dl_addr[18:16] == 3'b100;                // 40000-4FFFF
     wire dl_snd = dl_wr && dl_addr[18:13] == 6'b101000;             // 50000-51FFF
     wire dl_cfg = dl_wr && dl_addr[18:5] == 14'h2900;               // 52000-5201F
+    wire dl_68k = dl_wr && dl_addr[18:14] == 5'b10101;              // 54000-57FFF
 
-    logic [7:0]  prg [0:262143];
     logic [7:0]  gfx [0:65535];
     logic [7:0]  snd [0:8191];
     logic [7:0]  prg_q, gfx_q, snd_q;
@@ -95,14 +100,37 @@ module balsente_core #(
     wire  [15:0] gfx_addr;
     wire  [12:0] snd_addr;
 
-    always_ff @(posedge clk) begin
-        if (dl_prg) prg[dl_addr[17:0]] <= dl_data;
-        prg_q <= prg[prg_addr];
-    end
+    // Two ports: the CPU (and the download, which only runs while the CPU is
+    // held in reset), and the sprite engine reading Shrike Avenger's upper
+    // sprite bank.
+    // One M10K array with two ports: inferred, Quartus builds a copy per read
+    // port (rtl/memory/dpram_dc.sv).
+    logic [7:0]  prg_q2;
+    wire  [17:0] prg_a = dl_prg ? dl_addr[17:0] : prg_addr;
+    dpram_dc #(.ADDR_WIDTH(18), .DATA_WIDTH(8)) u_prg (
+        .clk_a(clk), .a_addr(prg_a), .a_wel(dl_prg), .a_weh(1'b0), .a_wdata(dl_data), .a_rdata(prg_q),
+        .clk_b(clk), .b_addr({2'b10, gfx_addr}), .b_re(1'b1), .b_rdata(prg_q2)
+    );
+
+    logic [7:0] gfx_q1;
     always_ff @(posedge clk) begin
         if (dl_gfx) gfx[dl_addr[15:0]] <= dl_data;
-        gfx_q <= gfx[gfx_addr];
+        gfx_q1 <= gfx[gfx_addr];
     end
+    // Shrike Avenger's sprite bank, delayed as MAME's shrike_sprite_select_w()
+    // delays it (the palette bank's rule, rtl/video/video.sv): a write during
+    // raster line v shows from line v + 16. The sprite engine builds line L
+    // during line L - 1, so it takes the bank sampled 14 line starts earlier.
+    wire        sprite_hi;
+    logic [14:0] spr_hist;
+    logic        spr_hi_line;
+    always_ff @(posedge clk) begin
+        if (ce_pix && hpos == 9'd319) begin
+            spr_hist    <= {spr_hist[13:0], sprite_hi};
+            spr_hi_line <= spr_hist[13];
+        end
+    end
+    assign gfx_q = spr_hi_line ? prg_q2 : gfx_q1;
     always_ff @(posedge clk) begin
         if (dl_snd) snd[dl_addr[12:0]] <= dl_data;
         snd_q <= snd[snd_addr];
@@ -111,6 +139,7 @@ module balsente_core #(
     // ------------------------------------------------------- configuration
     logic [7:0] cfg [0:31];
     initial for (int i = 0; i < 32; i++) cfg[i] = (i >= 16) ? 8'hff : 8'h00;
+    logic running;       // released from reset at the raster start; see below
     always_ff @(posedge clk) if (dl_cfg) cfg[dl_addr[4:0]] <= dl_data;
 
     // ------------------------------------------------------------- inputs
@@ -133,14 +162,27 @@ module balsente_core #(
     wire v_gun = cfg[7][2:0] == 3'd5;
     assign gun_game = v_gun;
 
-    logic [7:0] in0, in1;
+    // A bit in configuration bytes 8 (IN0) or 9 (IN1) is MAME's PORT_TOGGLE,
+    // Stocker's gear shift: each press flips it, and it reads pressed (low)
+    // while on. It starts off, as MAME's does.
+    logic [7:0] raw0, raw1, prev0, prev1, tog0, tog1, in0, in1;
     always_ff @(posedge clk) begin
         for (int i = 0; i < 8; i++) begin
-            in0[i] <= port_bit(cfg[16 + i], joystick_0, joystick_1, joystick_2, joystick_3, dips[16 + i]);
-            in1[i] <= port_bit(cfg[24 + i], joystick_0, joystick_1, joystick_2, joystick_3, dips[24 + i]);
+            raw0[i] <= port_bit(cfg[16 + i], joystick_0, joystick_1, joystick_2, joystick_3, dips[16 + i]);
+            raw1[i] <= port_bit(cfg[24 + i], joystick_0, joystick_1, joystick_2, joystick_3, dips[24 + i]);
         end
-        if (v_gun && ps2_mouse[0]) in1[1] <= 1'b0;
+        if (v_gun && ps2_mouse[0]) raw1[1] <= 1'b0;
+        prev0 <= raw0;
+        prev1 <= raw1;
+        if (!running) begin
+            tog0 <= '0; tog1 <= '0;
+        end else begin
+            tog0 <= tog0 ^ (prev0 & ~raw0 & cfg[8]);
+            tog1 <= tog1 ^ (prev1 & ~raw1 & cfg[9]);
+        end
     end
+    assign in0 = (raw0 & ~cfg[8]) | (~tog0 & cfg[8]);
+    assign in1 = (raw1 & ~cfg[9]) | (~tog1 & cfg[9]);
 
     // teamht's input groups (EX0-EX3): the four players' joysticks in bits
     // 7:4, active low; players 3 and 4 sit opposite, so theirs are reversed.
@@ -156,7 +198,6 @@ module balsente_core #(
     // released on the clock where the raster reaches the point reset puts it
     // at -- line 256, pixel 0, the start of a pixel -- so the machine starts
     // in the state sim/board_tb and MAME start in.
-    logic running;
     wire  at_start = ce_pix && hpos == 9'd319 && vpos == 9'd255;
     always_ff @(posedge clk or negedge raster_rst_n) begin
         if (!raster_rst_n) running <= 1'b0;
@@ -203,6 +244,7 @@ module balsente_core #(
     game_board #(.OPEN_BUS(OPEN_BUS)) u_main (
         .clk(clk), .rst_n(running), .raster_rst_n(raster_rst_n),
         .cfg_cdmask(cfg[0][5:0]), .cfg_swap(cfg[1][0]), .cfg_banks16(cfg[1][1]),
+        .cfg_bank2(cfg[1][2]),
         .cfg_variant(cfg[7][2:0]),
         .prg_addr(prg_addr), .prg_q(prg_q),
         .gfx_addr(gfx_addr), .gfx_q(gfx_q),
@@ -210,11 +252,13 @@ module balsente_core #(
         .uart_clk(uart_clk), .acia_rxd(snd_txd), .acia_txd(main_txd),
         .pause(pause), .flip(flip),
         .an0(an0), .an1(an1), .an2(an2), .an3(an3),
-        .adc_shift(cfg[6][1:0]), .adc_raw(cfg[6][7]),
+        .adc_shift(cfg[6][1:0]), .adc_raw(cfg[6][7]), .adc_raw_ob(cfg[6][6]),
         .ex0(ex(joystick_0, 1'b0)), .ex1(ex(joystick_1, 1'b0)),
         .ex2(ex(joystick_2, 1'b1)), .ex3(ex(joystick_3, 1'b1)),
         .wheel0(wheel0), .wheel1(wheel1), .wheel2(wheel2),
         .gun_x(gun_x), .gun_y(gun_y),
+        .shrike_dl_we(dl_68k), .shrike_dl_addr(dl_addr[13:0]), .shrike_dl_data(dl_data),
+        .sprite_hi(sprite_hi),
         .nv_ext_we(nv_ext_we), .nv_ext_addr(nv_ext_addr), .nv_ext_din(nv_ext_din),
         .nv_ext_q(nv_ext_q), .nv_cpu_wr(nv_cpu_wr),
         .r(br), .g(bg), .b(bb),

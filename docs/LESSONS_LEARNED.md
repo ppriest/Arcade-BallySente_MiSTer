@@ -1324,6 +1324,18 @@ ack address that is also an input port must acknowledge on writes only.
   -ssh -pw <pw> user@host "cmd"`.
 - **MSYS/Git-Bash silently mangles POSIX-looking arguments** (`/media/fat/...`) into Windows paths
   for non-MSYS programs. `MSYS_NO_PATHCONV=1`.
+- **[BallySente] Keep release `.rbf`s out of `_Arcade/cores/` next to the numbered builds.** An
+  `.mra`'s `<rbf>BallySente</rbf>` matched both `BallySente_20260927.rbf` (a release copy) and the
+  freshly deployed `Arcade-BallySente_30000012.rbf`, and the MiSTer ran the release. Every set the
+  release supported booted, so the deploy looked good; Shrike Avenger, added after it, was black and
+  silent. Moving the release copy aside made Shrike boot (`debug/hw/shrike-30000012.png`). When
+  only the newest set fails on hardware, list `_Arcade/cores/` before reading RTL.
+- **[BallySente] A picture upside down on every set is a flip default, not the screenshot path.**
+  `scripts/hw.py` shots of Chicken Shift and Shrike Avenger came back rotated 180 degrees
+  (`debug/hw/cshift-73b67a5.png`), and that was put down to the capture. The cause was the fake
+  Flip Screen DIP starting On (Main_MiSTer's `<switches default>` parse; skill LESSONS_LEARNED,
+  .mra section). With it Off the same capture is upright (`debug/hw/shrike-30000014.png`). Read the
+  OSD's flip settings before explaining a rotated frame away.
 
 
 - **[MS32] MAME is not the oracle for sound timing.** A sample's difference in when a voice starts
@@ -1377,7 +1389,7 @@ ack address that is also an input port must acknowledge on writes only.
   from a wrapper. `*.sh text eol=lf`, same for `.tcl` and `.lua`. `git add --renormalize` fixes the
   index only.
 - **[MS32] `Path.read_text()`/`write_text()` without `encoding=` corrupts UTF-8 on Windows.**
-  Default cp1252; `×` and `°` became single bytes and a file with an undecodable byte refused to
+  Default cp1252; `ï¿½` and `ï¿½` became single bytes and a file with an undecodable byte refused to
   load, so half an edit landed. Every repo-file `open` names `encoding="utf-8"`; a multi-file patch
   script checks all files in first.
 - **[GX] Never read a file inside the argument list of the call that truncates it.** `open(p,

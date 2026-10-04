@@ -20,7 +20,9 @@
 // default mapping does, down increasing Y, but at 10 a frame where MAME's
 // PORT_KEYDELTA is 20: 20 was reported too fast on hardware (docs/HACKS.md);
 // dials also take the spinner. Sticks are absolute, the position as a signed
-// byte.
+// byte, plus a position the d-pad moves as MAME's keys move an AD_STICK:
+// PORT_KEYDELTA(20) a frame while held, and back toward centre by the same 20
+// (its centre delta) once released.
 // MAME's screen Y grows downward and a PS/2 mouse's grows upward, so the
 // mouse's Y is negated.
 
@@ -42,6 +44,7 @@ module analog_inputs (
 );
 
     logic signed [15:0] acc_mx, acc_my, acc_sp0, acc_sp1;
+    logic signed [15:0] kp0, kp1, kp2, kp3;     // each port's d-pad stick position
     logic               mt_d, s0_d, s1_d, vb_d;
 
     wire signed [15:0] mdx = {{8{ps2_mouse[4]}}, ps2_mouse[15:8]};
@@ -59,9 +62,25 @@ module analog_inputs (
         keys = (inc && !dec) ? 16'sd10 : (dec && !inc) ? -16'sd10 : 16'sd0;
     endfunction
 
+    // A stick port's d-pad position, one frame on: the pair is (R, L) for X,
+    // (D, U) for Y; other kinds stay at 0.
+    function automatic logic signed [15:0] key_pos(input logic [7:0] c,
+        input logic signed [15:0] kp, input logic [3:0] d0, d1);
+        logic [3:0] d;
+        logic       inc, dec;
+        d   = (c[1:0] == 2'd0) ? d0 : (c[1:0] == 2'd1) ? d1 : 4'd0;
+        inc = (c[5:3] == 3'd4) ? d[0] : (c[5:3] == 3'd5) ? d[2] : 1'b0;
+        dec = (c[5:3] == 3'd4) ? d[1] : (c[5:3] == 3'd5) ? d[3] : 1'b0;
+        if (inc && !dec)      key_pos = (kp > 16'sd107)  ? 16'sd127  : kp + 16'sd20;
+        else if (dec && !inc) key_pos = (kp < -16'sd108) ? -16'sd128 : kp - 16'sd20;
+        else if (kp > 16'sd20)  key_pos = kp - 16'sd20;
+        else if (kp < -16'sd20) key_pos = kp + 16'sd20;
+        else                    key_pos = 16'sd0;
+    endfunction
+
     function automatic logic [7:0] port_value(input logic [7:0] c,
         input logic signed [15:0] mx, my, sp0, sp1, input logic [15:0] j0, j1,
-        input logic [3:0] d0, d1);
+        input logic [3:0] d0, d1, input logic signed [15:0] kp);
         logic signed [15:0] v;
         logic signed [15:0] mxx, myy;
         logic [15:0] j;
@@ -89,8 +108,8 @@ module analog_inputs (
             3'd2: v = ((pl == 2'd0) ? myy : 16'sd0) + rate(j[15:8]) + keys(d[2], d[3]);
             3'd3: v = ((pl == 2'd0) ? mxx + sp0 : (pl == 2'd1) ? sp1 : 16'sd0) + rate(j[7:0])
                       + keys(d[0], d[1]);
-            3'd4: v = 16'(signed'(j[7:0]));
-            3'd5: v = 16'(signed'(j[15:8]));
+            3'd4: v = 16'(signed'(j[7:0])) + kp;
+            3'd5: v = 16'(signed'(j[15:8])) + kp;
             default: v = 16'sd0;
         endcase
         if (c[6]) v = v >>> 1;
@@ -105,16 +124,25 @@ module analog_inputs (
             acc_mx <= '0; acc_my <= '0; acc_sp0 <= '0; acc_sp1 <= '0;
             mt_d <= 1'b0; s0_d <= 1'b0; s1_d <= 1'b0; vb_d <= 1'b0;
             an0 <= '0; an1 <= '0; an2 <= '0; an3 <= '0;
+            kp0 <= '0; kp1 <= '0; kp2 <= '0; kp3 <= '0;
         end else begin
             mt_d <= ps2_mouse[24];
             s0_d <= spinner0[8];
             s1_d <= spinner1[8];
             vb_d <= vblank;
             if (vblank && !vb_d) begin
-                an0 <= port_value(port_cfg[7:0],   acc_mx, acc_my, acc_sp0, acc_sp1, stick0, stick1, dpad0, dpad1);
-                an1 <= port_value(port_cfg[15:8],  acc_mx, acc_my, acc_sp0, acc_sp1, stick0, stick1, dpad0, dpad1);
-                an2 <= port_value(port_cfg[23:16], acc_mx, acc_my, acc_sp0, acc_sp1, stick0, stick1, dpad0, dpad1);
-                an3 <= port_value(port_cfg[31:24], acc_mx, acc_my, acc_sp0, acc_sp1, stick0, stick1, dpad0, dpad1);
+                kp0 <= key_pos(port_cfg[7:0], kp0, dpad0, dpad1);
+                an0 <= port_value(port_cfg[7:0],   acc_mx, acc_my, acc_sp0, acc_sp1, stick0, stick1, dpad0, dpad1,
+                                    key_pos(port_cfg[7:0], kp0, dpad0, dpad1));
+                kp1 <= key_pos(port_cfg[15:8], kp1, dpad0, dpad1);
+                an1 <= port_value(port_cfg[15:8],  acc_mx, acc_my, acc_sp0, acc_sp1, stick0, stick1, dpad0, dpad1,
+                                    key_pos(port_cfg[15:8], kp1, dpad0, dpad1));
+                kp2 <= key_pos(port_cfg[23:16], kp2, dpad0, dpad1);
+                an2 <= port_value(port_cfg[23:16], acc_mx, acc_my, acc_sp0, acc_sp1, stick0, stick1, dpad0, dpad1,
+                                    key_pos(port_cfg[23:16], kp2, dpad0, dpad1));
+                kp3 <= key_pos(port_cfg[31:24], kp3, dpad0, dpad1);
+                an3 <= port_value(port_cfg[31:24], acc_mx, acc_my, acc_sp0, acc_sp1, stick0, stick1, dpad0, dpad1,
+                                    key_pos(port_cfg[31:24], kp3, dpad0, dpad1));
                 acc_mx <= '0; acc_my <= '0; acc_sp0 <= '0; acc_sp1 <= '0;
             end else begin
                 if (ps2_mouse[24] != mt_d) begin

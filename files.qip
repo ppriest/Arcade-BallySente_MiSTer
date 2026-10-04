@@ -19,6 +19,13 @@ set_global_assignment -name SYSTEMVERILOG_FILE rtl/analog_inputs.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/grudge_steering.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/grudge_wheels.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/lightgun.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/shrike_board.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/mame_keys.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/memory/dpram_dc.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/memory/dpram_tdp.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/cpu/fx68k/fx68k.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/cpu/fx68k/fx68kAlu.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/cpu/fx68k/uaddrPla.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/irq_timer.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/acia6850.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/video/video.sv
@@ -38,6 +45,7 @@ set_global_assignment -name SYSTEMVERILOG_FILE rtl/sound/vco_blamp.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/sound/cem3394_lpf4.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/sound/tanh_lut.sv
 set_global_assignment -name SEARCH_PATH rtl/sound
+set_global_assignment -name SEARCH_PATH rtl/cpu/fx68k
 
 # MC6809E, vendored -- see rtl/cpu/mc6809/PROVENANCE.md.
 set_global_assignment -name VERILOG_FILE rtl/cpu/mc6809/mc6809i.v

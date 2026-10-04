@@ -21,10 +21,10 @@ module tb_adc;
     logic [2:0] sel = '0;
     logic [7:0] an0 = '0, an1 = '0, an2 = '0, an3 = '0;
     logic [1:0] shift = '0;
-    logic       raw = 0;
+    logic       raw = 0, raw_ob = 0;
     logic [7:0] q;
 
-    adc dut (.clk, .rst_n, .start, .sel, .an0, .an1, .an2, .an3, .shift, .raw, .q);
+    adc dut (.clk, .rst_n, .start, .sel, .an0, .an1, .an2, .an3, .shift, .raw, .raw_ob, .q);
 
     initial begin
         string path, kind;
@@ -35,7 +35,15 @@ module tb_adc;
         if (!$value$plusargs("vec=%s", path)) path = "debug/adc/minigolf_adc.vec";
         fd = $fopen(path, "r");
         if (fd == 0) begin $display("FAIL: cannot open %s", path); $finish; end
-        r = $fscanf(fd, "c %d %d\n", sh, rw);
+        begin
+            // "c <shift> <raw> [<offset binary>]"
+            string ln;
+            int    ob;
+            ob = 0;
+            void'($fgets(ln, fd));
+            r = $sscanf(ln, "c %d %d %d", sh, rw, ob);
+            raw_ob = ob[0];
+        end
         shift = 2'(sh); raw = rw[0];
 
         repeat (4) @(posedge clk);

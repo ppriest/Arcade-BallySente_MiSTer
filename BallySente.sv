@@ -89,12 +89,13 @@ wire        forced_scandoubler, direct_video;
 wire [21:0] gamma_bus;
 wire  [1:0] buttons;
 wire [127:0] status;
-wire [31:0] joystick_0, joystick_1, joystick_2, joystick_3;
+wire [31:0] joy_pad_0, joy_pad_1, joystick_2, joystick_3;
 wire        gun_game;    // the set has the gun: shows the OSD's H2 page
 wire [15:0] joystick_l_analog_0, joystick_l_analog_1, joystick_l_analog_2;
 wire [15:0] joystick_r_analog_0;
 wire  [8:0] spinner_0, spinner_1, spinner_2;
 wire [24:0] ps2_mouse;
+wire [10:0] ps2_key;
 
 wire        ioctl_download, ioctl_upload, ioctl_wr;
 assign LED_USER = ioctl_download;
@@ -118,8 +119,8 @@ hps_io #(.CONF_STR(CONF_STR)) hps_io
 	.status(status),
 	.status_menumask({13'd0, ~gun_game, direct_video, 1'b0}),
 
-	.joystick_0(joystick_0),
-	.joystick_1(joystick_1),
+	.joystick_0(joy_pad_0),
+	.joystick_1(joy_pad_1),
 	.joystick_2(joystick_2),
 	.joystick_3(joystick_3),
 	.joystick_l_analog_0(joystick_l_analog_0),
@@ -130,6 +131,7 @@ hps_io #(.CONF_STR(CONF_STR)) hps_io
 	.spinner_1(spinner_1),
 	.spinner_2(spinner_2),
 	.ps2_mouse(ps2_mouse),
+	.ps2_key(ps2_key),
 
 	.ioctl_download(ioctl_download),
 	.ioctl_index(ioctl_index),
@@ -171,18 +173,27 @@ end
 
 wire core_reset = reset | ioctl_download | ~rom_loaded;
 
+// MAME's default keys, ORed into the pads so every reader of joystick_0/1
+// sees them. Four buttons: Z and X would land on Start and Coin. The board has
+// no service coins, so 9 and 0 do nothing.
+wire [31:0] key_0, key_1;
+mame_keys #(.BUTTONS(4), .START(8), .COIN(9), .PAUSE(11), .SERVICE(10)) u_keys
+	(.clk(clk_sys), .ps2_key(ps2_key), .key0(key_0), .key1(key_1), .svc_coin());
+wire [31:0] joystick_0 = joy_pad_0 | key_0, joystick_1 = joy_pad_1 | key_1;
+
 ///////////////////////   DIPs   //////////////////////////////////
 
-// Bytes 0-3 are the board's (see balsente_core); byte 4 is the core's own:
-// bit 0 the fake Flip Screen DIP, since the board has no flip of its own.
-reg [39:0] dips = 40'hfeffffffff;
+// The board's (see balsente_core), except bit 24: the fake Flip Screen DIP,
+// since the board has no flip of its own and no set has a DIP there
+// (scripts/build_mra.py, FLIP_BIT, for why it is not above bit 31).
+reg [31:0] dips = 32'hfeffffff;
 always @(posedge clk_sys)
-	if (ioctl_wr && ioctl_index == 16'd254 && !ioctl_addr[24:3] && ioctl_addr[2:0] < 3'd5)
-		dips[{ioctl_addr[2:0], 3'b000} +: 8] <= ioctl_dout;
+	if (ioctl_wr && ioctl_index == 16'd254 && !ioctl_addr[24:2])
+		dips[{ioctl_addr[1:0], 3'b000} +: 8] <= ioctl_dout;
 
 // The OSD's Flip Screen and the fake DIP drive the one flip; set together
 // they cancel.
-wire flip = status[65] ^ dips[32];
+wire flip = status[65] ^ dips[24];
 
 ///////////////////////   PAUSE   /////////////////////////////////
 

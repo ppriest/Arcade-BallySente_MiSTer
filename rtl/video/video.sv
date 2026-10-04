@@ -121,9 +121,31 @@ module video #(
     wire [7:0] crow     = flip_f ? 8'd239 - nrow : nrow;
     wire [7:0] cx       = flip_f ? 8'd255 - nx[7:0] : nx[7:0];
 
+    // MAME's palette_select_w() redraws up to vpos() - 1 + VBEND before a bank
+    // change, and vpos() is already absolute, so a write during raster line v
+    // shows from line v + 16 on, a whole line at a time (docs/MAME_KLUDGES.md).
+    // The bank is sampled at each line start; the line being fetched takes the
+    // sample taken 15 line starts before its own (bank_hist[14] as it is
+    // shifted), latched a pixel before its fetch begins, since pixel 0 is looked
+    // up before hcnt reaches 319: a write in line v reaches v + 16.
+    logic [1:0] bank_hist [0:14];
+    logic [1:0] bank_line;
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            for (int i = 0; i < 15; i++) bank_hist[i] <= '0;
+            bank_line <= '0;
+        end else begin
+            if (line_start) begin
+                bank_hist[0] <= palbank;
+                for (int i = 1; i < 15; i++) bank_hist[i] <= bank_hist[i - 1];
+            end
+            if (ce_pix && hcnt == 9'd318) bank_line <= bank_hist[14];
+        end
+    end
+
     // The bank each row was drawn with, for flip screen's mirrored replay.
     logic [1:0] bank_row [0:255];
-    wire  [1:0] bank     = flip_f ? bank_row[crow] : palbank;
+    wire  [1:0] bank     = flip_f ? bank_row[crow] : bank_line;
 
     // ------------------------------------------------------------- sprites
     // Filled during this line for the next one.
@@ -161,7 +183,7 @@ module video #(
                 3'd3: begin
                     // sprite nibble high, background low, inside the bank
                     pal_addr <= {bank, spr_nib, cx[0] ? vram_q[3:0] : vram_q[7:4]};
-                    if (nx == 9'd0 && vis_n) bank_row[nrow] <= palbank;
+                    if (nx == 9'd0 && vis_n) bank_row[nrow] <= bank_line;
                 end
                 3'd5: begin
                     nr <= pal_q[3:0];        // byte 0

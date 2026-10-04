@@ -10,6 +10,8 @@ from that is not its own:
 | MiSTer framework | `sys/` | MiSTer-devel/Template_MiSTer | per file: GPL-2.0/3.0-or-later where stated | no (never touched since the initial commit; the upstream commit it was taken at is not recorded) |
 | mc6809i (main CPU) | `rtl/cpu/mc6809/` | Greg Miller's cavnex/mc6809, in jotego's clock-enable fork from jtcores | BSD-3-Clause (upstream's option taken); jotego's changes GPL-3.0 if jtcores' licence is read as covering them | no; `PROVENANCE.md` |
 | T80 (6VB sound CPU) | `rtl/cpu/t80/` | MiSTer-devel/T80 `830fd03`, via the Fuuki and Psikyo cores; Daniel Wallner, MikeJ and the MiSTer-devel maintainers | BSD-3-Clause-style, in each file's header | one line of `T80.vhd` (a std_logic width fix for block I/O), marked in place; `T80_upstream_reference.vhd` is the pristine copy; `PROVENANCE.md` |
+| FX68K (Shrike Avenger's 68000) | `rtl/cpu/fx68k/` | Jorge Cwik, ijor/fx68k `0602ee4`; the Verilator revision as in MiSTer-devel/Arcade-IGSPGM_MiSTer | GPL-3.0 | the Verilator revision's two `$readmemb` paths, marked in place; `PROVENANCE.md` |
+| Shrike Avenger's 68000 board | `rtl/shrike_board.sv` | adapted from `rtl/shrike_68k_board.sv` in misteraddons' Arcade-BallySenteSAC1_MiSTer (commit `3f015f22`), used under GPL-3.0 with its author's permission | GPL-3.0 | clock enables, reset and RAMs rewritten for this core; the header says so |
 | screen_rotate_two | `rtl/video/screen_rotate_two.sv` | Sorgelig, via Arcade-Fuuki_MiSTer and Arcade-SKNS_MiSTer | GPL-2.0-or-later | no; `rtl/video/PROVENANCE.md` |
 
 ## Derived from MAME

@@ -12,7 +12,7 @@ clk_sys cycles from the first event:
     s <cycle> <channel>
     r <cycle> <data> <check>            check 0: the read falls in the frame after
                                         a "v", before the board has latched it
-The second line is "c <shift> <raw>", the set's config_shooter_adc().
+The first line is "c <shift> <raw> <offset binary>", the set's ADC byte.
 """
 import argparse
 import sys
@@ -35,7 +35,7 @@ def vectors(trace, adc):
         p = ln.split()
         ev.append((p[0], float(p[1]), [int(x) for x in p[2:]]))
     t0 = ev[0][1]
-    out = [f"c {adc & 3} {adc >> 7 & 1}"]
+    out = [f"c {adc & 3} {adc >> 7 & 1} {adc >> 6 & 1}"]
     last_v = -1.0
     for kind, t, a in ev:
         cyc = round((t - t0) * CLK)

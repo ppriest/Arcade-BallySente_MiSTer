@@ -146,6 +146,9 @@ def main():
     ap.add_argument("--beam", action="store_true",
                     help="also record the RAM at the start of the frame and every write "
                          "during it with its raster line, for a scanline-accurate reference")
+    ap.add_argument("--coins", type=int, default=1, help="coins to insert, 30 frames apart")
+    ap.add_argument("--start2", default=None,
+                    help="a second Start field to press with the first (shrike: '2 Players Start')")
     ap.add_argument("--coin", type=int, default=0,
                     help="frame at which to insert a coin; Start follows 90 frames later. "
                          "0 captures attract mode.")
@@ -181,7 +184,8 @@ def main():
                CORE_READ=spec(r.get("read", {})), CORE_WTAP=spec(r.get("wtap", {})),
                CORE_SCANREG=spec(r.get("scanreg", {})),
                CORE_BEAM=spec(r.get("beam", {})) if a.beam else "",
-               CORE_COIN=str(a.coin),
+               CORE_COIN=str(a.coin), CORE_COINS=str(a.coins),
+               CORE_IN_START2=a.start2 or "",
                CORE_IN_COIN=r.get("inputs", {}).get("coin", "Coin 1"),
                CORE_IN_START=r.get("inputs", {}).get("start", "1 Player Start"))
     print(f"{a.set} frame {a.frame} -> {out}")

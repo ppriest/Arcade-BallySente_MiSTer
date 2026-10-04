@@ -107,6 +107,28 @@ module tb_analog;
         check("d-pad left+right", an0, 0);
         dpad0 = '0;
 
+        // Sticks from the d-pad as MAME's AD_STICK keys: 20 a frame while held,
+        // back toward centre by 20 once released, each axis on its own pair.
+        // Shrike's layout: AN0 stick Y P1, AN1 stick X P1.
+        port_cfg = {16'd0, 8'(4 << 3), 8'(5 << 3)};
+        frame();
+        dpad0 = 4'b1000;                     // up
+        frame(); check("stick up 1", an0, -20); check("X still", an1, 0);
+        frame(); check("stick up 2", an0, -40);
+        repeat (4) frame();
+        check("stick up 6", an0, -120);
+        frame(); check("stick up clamp", an0, -128);
+        dpad0 = 4'b0001;                     // up released, right held
+        frame(); check("Y recentres", an0, -108); check("X right", an1, 20);
+        dpad0 = 4'b0101;                     // down and right
+        frame(); check("Y down", an0, -88); check("X right 2", an1, 40);
+        dpad0 = '0;
+        stick0 = {8'd30, 8'd0};              // the stick adds to the d-pad's
+        frame(); check("Y stick + d-pad", an0, -68 + 30); check("X recentres", an1, 20);
+        stick0 = '0;
+        repeat (4) frame();
+        check("Y centred", an0, 0); check("X centred", an1, 0);
+
         $display("%0d checks, %0d failures", nchk, nbad);
         if (nbad == 0) $display("PASS");
         else           $display("FAIL");

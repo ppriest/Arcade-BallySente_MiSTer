@@ -41,7 +41,10 @@ module tb_board #(
     always #12.5 clk = ~clk;              // 40 MHz
     logic rst_n = 0;
 
-    localparam int IMAGE = 32'h52020;
+    // Through Shrike Avenger's 68000 program (0x54000-0x57FFF); the
+    // configuration's 32 bytes are at 0x52000.
+    localparam int IMAGE = 32'h58000;
+    localparam int CFG   = 32'h52000;
     logic [7:0] image [0:IMAGE-1];
 
     logic        dl_wr = 0;
@@ -103,9 +106,11 @@ module tb_board #(
     real               ram_from = 0, ram_to = 0;
     longint            acyc = 0;
     int                f_peak = 0, m_peak = 0, en_n = 0;
+    int                coins = 1;     // +coins=2: a second 30 frames later
     int                coin_at = -1, a_nz = 0, a_peak = 0, a_frame = 0, a_n = 0, a_cv = 0;
     always_ff @(posedge clk) begin
-        joy0[9] <= coin_at >= 0 && frame >= coin_at && frame < coin_at + 6;
+        joy0[9] <= coin_at >= 0 && ((frame >= coin_at && frame < coin_at + 6) ||
+                   (coins > 1 && frame >= coin_at + 30 && frame < coin_at + 36));
         joy0[8] <= coin_at >= 0 && frame >= coin_at + 90 && frame < coin_at + 96;
         if (inmode != 0) begin
             // scripts/mame/inputtrace.lua's schedule, step k = frame / 8
@@ -257,6 +262,20 @@ module tb_board #(
         end
     end
 
+    // The last frame before the dump as it left the core, 256 x 240 RGB, each
+    // 4-bit channel scaled to 8 bits (x17), for comparison with MAME's
+    // reference.bin (RGBA): pix.bin.
+    logic [7:0] pix [0:256*240*3-1];
+    int         pix_n = 0;
+    always_ff @(posedge clk) begin
+        if (frame == target - 1 && ce_pix && !hblank && !vblank && pix_n < 256 * 240) begin
+            pix[pix_n * 3]     <= {r, r};
+            pix[pix_n * 3 + 1] <= {g, g};
+            pix[pix_n * 3 + 2] <= {b, b};
+            pix_n <= pix_n + 1;
+        end
+    end
+
     task automatic dump(input string name, input int n, input int which);
         int f;
         f = $fopen({outdir, "/", name}, "wb");
@@ -281,6 +300,7 @@ module tb_board #(
         if (!$value$plusargs("out=%s", outdir))       outdir = "debug/cshift-board";
         if (!$value$plusargs("frame=%d", target))     target = 1200;
         void'($value$plusargs("coin=%d", coin_at));
+        void'($value$plusargs("coins=%d", coins));
         begin
             string m;
             if ($value$plusargs("insched=%s", m)) begin
@@ -294,7 +314,7 @@ module tb_board #(
 
         foreach (image[i]) image[i] = 8'h00;
         $readmemh(image_file, image);
-        if (image[IMAGE - 32 + 16] === 8'h00 && image[IMAGE - 32 + 17] === 8'h00)
+        if (image[CFG + 16] === 8'h00 && image[CFG + 17] === 8'h00)
             $fatal(1, "%s has no input map -- build it with scripts/build_mra.py --image",
                    image_file);
 
@@ -328,6 +348,13 @@ module tb_board #(
         dump("vram.bin", 30720, 0);
         dump("pal.bin",  4096,  1);
         dump("sram.bin", 256,   2);
+        begin
+            int fp;
+            fp = $fopen({outdir, "/pix.bin"}, "wb");
+            for (int i = 0; i < 256 * 240 * 3; i++) $fwrite(fp, "%c", pix[i]);
+            $fclose(fp);
+            $display("  %0d visible pixels in the last frame -> pix.bin", pix_n);
+        end
         $display("  of the 9axx reads: %0d random, %0d ACIA", rd_random, rd_acia);
         for (int i = 0; i < 16; i++)
             if (io_rd[i] != 0)

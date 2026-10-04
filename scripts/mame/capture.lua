@@ -166,7 +166,10 @@ end
 -- Coin and start, so a capture can be of the GAME rather than of attract mode.
 -- CORE_COIN is the frame at which to insert a coin; Start follows 90 frames
 -- later. Each is held six frames, because one is below a game's own debounce.
+-- CORE_COINS coins go in, 30 frames apart; CORE_IN_START2, if set, is pressed
+-- with Start (Shrike Avenger's second seat button).
 local COIN = tonumber(os.getenv("CORE_COIN") or "0")
+local COINS = tonumber(os.getenv("CORE_COINS") or "1")
 
 local function field(name)
     for _, port in pairs(m.ioport.ports) do
@@ -178,6 +181,8 @@ end
 
 local f_coin  = COIN > 0 and field(os.getenv("CORE_IN_COIN") or "Coin 1") or nil
 local f_start = COIN > 0 and field(os.getenv("CORE_IN_START") or "1 Player Start") or nil
+local s2 = os.getenv("CORE_IN_START2")
+local f_start2 = (COIN > 0 and s2 and s2 ~= "") and field(s2) or nil
 if COIN > 0 and not (f_coin and f_start) then
     local f = io.open(OUT .. "/ERROR.txt", "a")
     if f then f:write("coin or start field not found\n"); f:close() end
@@ -189,8 +194,14 @@ core_subs[#core_subs + 1] = emu.add_machine_frame_notifier(guard("frame", functi
     local scr = m.screens[":screen"]
     if f_coin and f_start then
         local n = scr:frame_number()
-        f_coin:set_value((n >= COIN and n < COIN + 6) and 1 or 0)
-        f_start:set_value((n >= COIN + 90 and n < COIN + 96) and 1 or 0)
+        local c = 0
+        for k = 0, COINS - 1 do
+            if n >= COIN + 30 * k and n < COIN + 30 * k + 6 then c = 1 end
+        end
+        f_coin:set_value(c)
+        local s = (n >= COIN + 90 and n < COIN + 96) and 1 or 0
+        f_start:set_value(s)
+        if f_start2 then f_start2:set_value(s) end
     end
     -- One frame early: dump the RAM the captured frame starts from, and open
     -- the write log. The notifier fires once per frame, so everything logged

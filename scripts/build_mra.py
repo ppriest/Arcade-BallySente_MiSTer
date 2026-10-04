@@ -25,12 +25,14 @@ THE INDEX-0 IMAGE, which rtl/balsente_core.sv decodes:
     0x50000  the 6VB's ROM, 8 KB (sente6vb.zip)
     0x52000  configuration, 32 bytes:
                0      expand_roms() mask, low 6 bits
-               1      bit 0 SWAP_HALVES, bit 1 a 256 KB maincpu region
+               1      bit 0 SWAP_HALVES, bit 1 a 256 KB maincpu region, bit 2 the
+                      second ROM bank at 0x9F00 (the st1002 and spiker boards)
                2-5    AN0-AN3 descriptors (rtl/analog_inputs.sv)
                6      ADC: bits 1:0 the shift, bit 7 raw (rtl/adc.sv)
                7      board variant (rtl/main_bus.sv): 1 teamht, 2 grudge,
                       3 spiker, 4 rescraid, 5 the gun (nstocker)
-               8-15   0
+               8, 9   IN0, IN1 bits that toggle on each press (PORT_TOGGLE)
+               10-15  0
                16-23  IN0 bits 0-7, one map byte each
                24-31  IN1 bits 0-7 (bit 7 is VBLANK, from the board)
 
@@ -48,9 +50,12 @@ buttons 1-4, 8 Start, 9 Coin, 10 Service, 11 Pause, 12 Start 3, 13 Start 4
 (on player 1's controller: those sets pick the player count on one panel),
 14-17 the right stick R, L, D, U (rescraid). A set with third and fourth
 players' controls (teamht, grudge) takes theirs from joysticks 2 and 3.
-<switches> bytes are SWH (0x9900), SWG (0x9901), the DIP bits of IN0 and IN1, then a fifth byte
-the board never sees: bit 0 is the fake Flip Screen DIP (BallySente.sv), since
-no set has a flip of its own.
+<switches> bytes are SWH (0x9900), SWG (0x9901), the DIP bits of IN0 and IN1.
+Bit 24 (IN1 bit 0, a DIP on no set) is the fake Flip Screen DIP
+(BallySente.sv), since no set has a flip of its own. It cannot go above bit 31:
+Main_MiSTer builds the default with `binary[i] << (i * 8)` on an int
+(support/arcade/mra_loader.cpp), so byte 3's top bit sign-extends over bits
+32-63 and a fifth byte is shifted out.
 """
 import argparse
 import os
@@ -70,21 +75,21 @@ import mra                                        # noqa: E402
 
 PHASE2 = ["sentetst", "cshift", "hattrick", "toggle", "gghost"]
 
-# Every set the RTL runs. Left out: shrike (68000), triviaes4/5 (other hardware).
+# Every set the RTL runs. Left out: triviaes4/5 (other hardware).
 RUNNABLE = PHASE2 + ["otwalls", "snakepit", "snakepita", "snakjack", "stocker",
                      "triviag1", "triviag1a", "triviabb", "triviag2", "triviayp",
                      "triviasp", "triviaes", "triviaes2", "gimeabrk", "minigolf",
                      "minigolfa", "minigolfb", "minigolfct", "sfootbal", "nametune",
                      "nametunea", "teamht", "grudge", "grudgei", "grudgep", "spiker",
                      "spikera", "spikerb", "rescraid", "rescraida", "stompin", "stompina",
-                     "nstocker", "nstockera"]
+                     "nstocker", "nstockera", "shrike"]
 
 ANALOG_KIND = {"TRACKBALL_X": 1, "TRACKBALL_Y": 2, "DIAL": 3, "AD_STICK_X": 4,
                "AD_STICK_Y": 5, "PADS": 6}
 
 # Configuration byte 7, the board variant (rtl/main_bus.sv), by MACHINE_CONFIG;
 # 5, the light gun, comes from config_shooter_adc(true, ...) instead.
-VARIANT = {"teamht": 1, "grudge": 2, "spiker": 3, "rescraid": 4}
+VARIANT = {"teamht": 1, "grudge": 2, "spiker": 3, "rescraid": 4, "shrike": 6}
 
 PRG_SIZE, GFX_SIZE, SND_SIZE = 0x40000, 0x10000, 0x2000
 GFX_BASE, SND_BASE, CFG_BASE = 0x40000, 0x50000, 0x52000
@@ -175,10 +180,13 @@ def ports(game, refresh):
                        cwd=mame_dir, env=env, capture_output=True, text=True, **NO_WINDOW)
         if not path.exists():
             sys.exit(f"ports.lua wrote nothing for {game}")
+    lines = path.read_text().splitlines()
+    if not refresh and lines and len(lines[0].split("\t")) < 7:
+        return ports(game, True)      # dumped before ports.lua wrote the toggle column
     out = set()
-    for ln in path.read_text().splitlines():
+    for ln in lines:
         f = ln.split("\t")
-        out.add((f[0], int(f[1]), int(f[2]), f[3]))
+        out.add((f[0], int(f[1]), int(f[2]), f[3] + ("/toggle" if f[6] == "toggle" else "")))
     return sorted(out)
 
 
@@ -296,11 +304,36 @@ def gfx_parts(game):
     a 32 KB region mirrors."""
     size = region_size(game, "gfx1")
     parts, _ = region_parts(game, "gfx1", min(size, GFX_SIZE))
+    # A 128 KB region (Shrike Avenger) is two banks; the upper one goes in the
+    # program region's free half (shrike_parts()).
     return parts * max(1, GFX_SIZE // size)
 
 
-def region_parts(game, region, size):
-    """<part> elements for one region: every load at its offset, gaps 0x00."""
+# Shrike Avenger: its 128 KB program leaves the upper half of the 256 KB
+# program region free, and the second 64 KB of sprites goes there (read by the
+# core's second program-ROM port); its 68000 program follows the configuration.
+SHRIKE_SPR_HI = 0x20000
+M68K_BASE, M68K_SIZE = 0x54000, 0x4000
+
+
+def shrike_prg_parts(game):
+    lo, _ = region_parts(game, "maincpu", SHRIKE_SPR_HI)
+    hi, _ = region_parts(game, "gfx1", GFX_SIZE, lo=GFX_SIZE)
+    return lo + hi + [f'<part repeat="{PRG_SIZE - SHRIKE_SPR_HI - GFX_SIZE:#x}">00</part>']
+
+
+def m68k_parts(game):
+    """The 68000's two ROM_LOAD16_BYTE halves, even (high) bytes first, whole."""
+    recs, unknown = region_records(blocks(driver_text())[game], "68k")
+    if unknown or any(r[0] != "load16_byte" for r in recs) or len(recs) != 2:
+        sys.exit(f"{game} 68k: expected two ROM_LOAD16_BYTE records: {recs} {unknown}")
+    recs = sorted(recs, key=lambda r: r[2] & 1)
+    return [f'<part name="{r[1]}" crc="{r[4]:08x}"/>' for r in recs]
+
+
+def region_parts(game, region, size, lo=0):
+    """<part> elements for one region, or for its window [lo, lo + size):
+    every load at its offset, gaps 0x00."""
     text = driver_text()
     recs, unknown = region_records(blocks(text)[game], region)
     if unknown:
@@ -325,20 +358,25 @@ def region_parts(game, region, size):
     # is left of it.
     kept = []
     for p in pieces:
-        lo, hi = p[0], p[0] + p[4]
+        plo, phi = p[0], p[0] + p[4]
         nxt = []
         for q in kept:
             qlo, qhi = q[0], q[0] + q[4]
-            if qhi <= lo or qlo >= hi:
+            if qhi <= plo or qlo >= phi:
                 nxt.append(q)
                 continue
-            if qlo < lo:
-                nxt.append((qlo, q[1], q[2], q[3], lo - qlo))
-            if qhi > hi:
-                nxt.append((hi, q[1], q[2], q[3] + (hi - qlo), qhi - hi))
+            if qlo < plo:
+                nxt.append((qlo, q[1], q[2], q[3], plo - qlo))
+            if qhi > phi:
+                nxt.append((phi, q[1], q[2], q[3] + (phi - qlo), qhi - phi))
         kept = nxt + [p]
     loadlen = {q[1]: q[4] for q in pieces if q[3] == 0}
-    pieces = sorted(kept)
+    win = []
+    for dest, name, crc, foff, length in kept:
+        a, b = max(dest, lo), min(dest + length, lo + size)
+        if a < b:
+            win.append((a - lo, name, crc, foff + (a - dest), b - a))
+    pieces = sorted(win)
     out, pos = [], 0
     for dest, name, crc, foff, length in pieces:
         if dest < pos:
@@ -360,7 +398,7 @@ def region_parts(game, region, size):
 
 
 # ---------------------------------------------------------------- inputs
-def input_map(fields):
+def input_map(fields, seats=False):
     """16 map bytes for IN0 and IN1, the number of buttons the set uses, and
     which joystick bits past Pause (EXTRA_BITS) it uses."""
     m = {}
@@ -370,10 +408,19 @@ def input_map(fields):
     # A set with a third player's controls has its own Start and Coin for them;
     # otherwise START3/4 are the player-count buttons on player 1's controller.
     three = any(t.startswith(("P3_", "P4_")) or t == "COIN3" for t in toks)
+    # Shrike Avenger's cabinet has two seat buttons the game wants pressed
+    # together (misteraddons' notes; MAME's START1 and START2): both are Start.
+    toggle = [0, 0]
     for tag, mask, dflt, tok in fields:
         if tag not in (":IN0", ":IN1"):
             continue
         port = 0 if tag == ":IN0" else 1
+        # PORT_TOGGLE (Stocker's gear): a press flips the bit (rtl/balsente_core.sv).
+        # MAME marks every DIP switch a toggle too; those are not inputs here.
+        if tok.endswith("/toggle"):
+            tok = tok[:-len("/toggle")]
+            if tok != "DIPSWITCH":
+                toggle[port] |= mask
         for b in range(8):
             if not mask >> b & 1:
                 continue
@@ -394,6 +441,10 @@ def input_map(fields):
                 code = player_code(pl, 3 + int(bt.group(2)), high, tok)
                 if pl <= 2:
                     used[pl - 1].add(int(bt.group(2)))
+            elif seats and tok == "START2":
+                code = 8 + high
+            elif tok == "P1_BUTTON5":
+                code = 0xfe if high else 0xff      # Shrike's carpet switch, left released
             elif st and (three or st.group(2) in "12"):
                 code = player_code(int(st.group(2)), 8 if st.group(1) == "START" else 9, high, tok)
             elif tok in ("START3", "START4"):
@@ -413,7 +464,7 @@ def input_map(fields):
                 sys.exit(f"input {tag} bit {b}: two fields ({m[key]:#x}, {code:#x})")
             m[key] = code
     out = bytes(m.get((p, b), 0xff) for p in (0, 1) for b in range(8))
-    return out, max(max(used[0], default=0), max(used[1], default=0)), extras
+    return out, max(max(used[0], default=0), max(used[1], default=0)), extras, toggle
 
 
 def player_code(pl, bit, high, tok):
@@ -434,14 +485,19 @@ def osd_name(s):
     return s.replace(",", "")
 
 
+FLIP_BIT = 24
+
+
 def dip_xml(machine):
-    default = [0xff, 0xff, 0xff, 0xff, 0xfe]
+    default = [0xff, 0xff, 0xff, 0xff]
     lines = []
     for sw in machine.findall("dipswitch"):
         tag, mask = ":" + sw.get("tag").lstrip(":"), int(sw.get("mask"))
         if tag not in DIP_BYTE:
             sys.exit(f"dipswitch {sw.get('name')} on unexpected port {tag}")
         byte = DIP_BYTE[tag]
+        if byte == FLIP_BIT // 8 and mask >> (FLIP_BIT % 8) & 1:
+            sys.exit(f"dipswitch {sw.get('name')} is on the fake Flip Screen's bit {FLIP_BIT}")
         lo = (mask & -mask).bit_length() - 1
         hi = mask.bit_length() - 1
         if mask != ((1 << (hi + 1)) - (1 << lo)):
@@ -465,7 +521,8 @@ def dip_xml(machine):
             sys.exit(f"dip {name!r} is {width} columns, more than the OSD's {OSD_COLS}")
         bits = f"{byte * 8 + lo}" if lo == hi else f"{byte * 8 + lo},{byte * 8 + hi}"
         lines.append(f'<dip name="{name}" bits="{bits}" ids="{",".join(ids)}"/>')
-    lines.append('<dip name="Flip Screen" bits="32" ids="Off,On"/>')
+    default[FLIP_BIT // 8] &= ~(1 << FLIP_BIT % 8)
+    lines.append(f'<dip name="Flip Screen" bits="{FLIP_BIT}" ids="Off,On"/>')
     return default, lines
 
 
@@ -481,12 +538,18 @@ def build(game, refresh):
     fields = ports(game, refresh)
 
     cdmask, swap = cart_config(text, g["init"])
-    prg, prg_len = region_parts(game, "maincpu", PRG_SIZE)
+    shrike = region_size(game, "gfx1") > GFX_SIZE
+    if shrike:
+        prg, prg_len = shrike_prg_parts(game), SHRIKE_SPR_HI
+    else:
+        prg, prg_len = region_parts(game, "maincpu", PRG_SIZE)
     gfx = gfx_parts(game)
     banks16 = prg_len > 0x20000
 
-    imap, nbuttons, extras = input_map(fields)
+    imap, nbuttons, extras, toggle = input_map(fields, seats=shrike)
     adc, shooter = adc_config(text, g["init"])
+    if shrike:
+        adc |= 0x40      # the stick's raw ports are 0x80-centred (rtl/adc.sv)
     variant = 5 if shooter else VARIANT.get(g["machine"], 0)
     aports = analog_ports(text, g["inp"])
     if variant == 2:
@@ -502,8 +565,9 @@ def build(game, refresh):
                 aports[i] = (p[0], 0, p[2], p[3])
                 nomouse[i] = True
     an = [b | (4 if nm else 0) for b, nm in zip(analog_bytes(aports), nomouse)]
-    cfg = bytes([cdmask, (1 if swap else 0) | (2 if banks16 else 0), *an, adc,
-                 variant]) + bytes(8) + imap
+    bank2 = g["machine"] in ("st1002", "spiker")
+    cfg = bytes([cdmask, (1 if swap else 0) | (2 if banks16 else 0) | (4 if bank2 else 0), *an, adc,
+                 variant, *toggle]) + bytes(6) + imap
     default, dips = dip_xml(machine)
 
     names = BUTTON_NAMES.get(game) or BUTTON_NAMES.get(g["parent"] or "") or \
@@ -518,6 +582,9 @@ def build(game, refresh):
     players = machine.find("input").get("players") if machine.find("input") is not None else "1"
 
     ind = "\t\t"
+    m68k = "".join(f"\n{ind}" + q for q in
+                   ([f'<part repeat="{M68K_BASE - IMAGE_SIZE:#x}">00</part>'] + m68k_parts(game)
+                    if shrike else []))
     body = "\n".join(ind + p for p in prg + gfx)
     cfg_hex = " ".join(f"{b:02X}" for b in cfg)
     note = ("\n\t<!-- Analog: " + ", ".join(
@@ -539,7 +606,7 @@ def build(game, refresh):
 	<rom index="0" zip="{zips}" md5="none">
 {body}
 		<part name="{SND_ROM}" crc="{SND_CRC}"/>
-		<part>{cfg_hex}</part>
+		<part>{cfg_hex}</part>{m68k}
 	</rom>
 
 	<nvram index="4" size="512"/>
@@ -568,13 +635,24 @@ def check_image(game, path, cfg, parent=None):
             if (d / z).exists():
                 zips.append(str(d / z))
                 break
-    img = mra.build_image(str(path), zips, IMAGE_SIZE)
     prg = region(game, "maincpu", zips=own)
-    gfx = region(game, "gfx1", zips=own)
-    want = prg + bytes(PRG_SIZE - len(prg)) + bytes(gfx) * max(1, GFX_SIZE // len(gfx))
+    gfx = bytes(region(game, "gfx1", zips=own))
+    shrike = len(gfx) > GFX_SIZE
+    img = mra.build_image(str(path), zips, M68K_BASE + M68K_SIZE if shrike else IMAGE_SIZE)
+    if shrike:
+        want = (bytes(prg) + gfx[GFX_SIZE:] + bytes(PRG_SIZE - len(prg) - GFX_SIZE)
+                + gfx[:GFX_SIZE])
+    else:
+        want = prg + bytes(PRG_SIZE - len(prg)) + gfx * max(1, GFX_SIZE // len(gfx))
     with zipfile.ZipFile(zips[-1]) as z:
         want += z.read(SND_ROM)
     want += cfg
+    if shrike:
+        # the two ROM_LOAD16_BYTE files whole, even (high) bytes first
+        recs = sorted(region_records(blocks(driver_text())[game], "68k")[0], key=lambda r: r[2] & 1)
+        zs = [zipfile.ZipFile(z) for z in zips]
+        want += bytes(M68K_BASE - IMAGE_SIZE) + b"".join(
+            mra._zip_read(zs, r[1], r[4]) for r in recs)
     if img != want:
         i = next(k for k in range(len(want)) if img[k] != want[k])
         sys.exit(f"{path.name}: image differs from build_region.py at {i:#x}")

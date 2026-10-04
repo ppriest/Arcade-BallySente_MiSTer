@@ -11,9 +11,10 @@
 // moves like the d-pad and a partly deflected one aims; Aim, always aiming;
 // D-pad, always moving. Axes are independent.
 //
-// MAME's crosshair spans the visible area, 256 x 240, for 0-255 on each axis,
-// so Y is scaled by 15/16 on screen, then raised 16 lines to where the game
-// lands the shot.
+// The crosshair is where the game lands the shot: X is the pixel column, and Y
+// a raster line counted from the top of the frame, so the visible row is
+// y - 16, the 16 blanked lines above row 0 (BALSENTE_VBEND). MAME's crosshair
+// instead spreads 0-255 over the 240 visible rows, which puts it 16 lines low.
 
 module lightgun (
     input  logic        clk,
@@ -80,12 +81,9 @@ module lightgun (
         end
     end
 
-    // Where on screen: y * 15/16, 16 lines up -- MAME's crosshair mapping put
-    // it 16 lines below where the game lands the shot, a constant offset
-    // (reported on hardware) -- then mirrored with the picture.
+    // Where on screen: row y - 16, then mirrored with the picture.
     wire [8:0] sx0 = {1'b0, gun_x};
-    wire [8:0] y15 = {1'b0, gun_y} - {5'b0, gun_y[7:4]};
-    wire [8:0] sy0 = (y15 < 9'd16) ? 9'd0 : y15 - 9'd16;
+    wire [8:0] sy0 = (gun_y < 8'd16) ? 9'd0 : {1'b0, gun_y} - 9'd16;
     wire [8:0] sx  = flip ? 9'd255 - sx0 : sx0;
     wire [8:0] sy  = flip ? 9'd239 - sy0 : sy0;
 

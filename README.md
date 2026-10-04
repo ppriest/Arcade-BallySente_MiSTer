@@ -65,13 +65,13 @@ Sets with an `.mra` in `releases/` (clones in `releases/_alternatives/_<parent>/
 | Rescue Raider (5/11/87 and stand-alone) | 1987 | Bally/Sente | two joysticks, one button | the right stick, or R Right/Left/Down/Up |
 | Stompin' (4/4/86 and prototype) | 1986 | Bally/Sente | eight foot pads, one button | the pads are the d-pad's eight directions |
 | Night Stocker (10/6/86 and 8/27/86) | 1986 | Bally/Sente | light gun, dial, one button | gun from the mouse, d-pad or left stick, with a crosshair |
+| Shrike Avenger (prototype) | 1986 | Bally/Sente | flight stick, four buttons | a second board with a 68000; Start presses both seat buttons |
 
 ### Out of scope for now
 
 | MAME description | Why |
 |-|-|
 | Trivial Pursuit (Volumen IV / Volumen V, Spanish, Maibesa hardware) (`triviaes4`, `triviaes5`) | different Maibesa hardware (MC6845 CRTC, Z80 with 2×AY8910 and MSM5205), and MAME marks both `MACHINE_NOT_WORKING` |
-| Shrike Avenger (`shrike`) | a second CPU (68000) and 120 KB of sprite ROM; MAME's own note says it does not work properly. Deferred, not dropped |
 
 ## Hardware
 
@@ -206,13 +206,17 @@ Copy `releases/Arcade-BallySente_20260927.rbf` to `_Arcade/cores` and `releases/
 
 ## Controls
 
+- Keyboard, MAME's defaults: arrows / R F D G, buttons LCtrl LAlt Space LShift / A S Q W,
+  Start 1 / 2, Coin 5 / 6; F2 service, P pause. The keys act wherever the d-pad does (trackballs,
+  dials, the gun).
 - **Pause** freezes both CPUs; the OSD can also pause while it is open.
 - **Start 3** and **Start 4** are on the first controller, for the sets that pick the number of
   players on one panel (Trivial Pursuit, Mini Golf).
 - Trackballs and dials: player 1's from the mouse; any player's from its controller's d-pad (at
   half the speed of MAME's default keys) or left analog stick, moving at a rate set by how far it is pushed;
   dials also from the spinner. Street
-  Football's sticks are the controllers' left analog sticks.
+  Football's and Shrike Avenger's sticks are the controllers' left analog sticks, or the d-pad as
+  MAME's keys drive them (20 a frame, re-centring when released).
 - Night Stocker's gun: the mouse (left button is also the trigger), the d-pad (two units a
   frame) or the left stick (aims directly; OSD "Gun stick": Auto, Aim, D-pad, as the Seta core's
   Zombie Raid). Its dial is the spinner or the right stick's left/right. OSD "Crosshair" hides the crosshair.
@@ -316,6 +320,9 @@ where they matter.
   emulations that are this core's specification.
 - **Greg Miller** for the `mc6809i` 6809 core, and **jotego** for its clock-enable fork.
 - **Daniel Wallner** and the MiSTer-devel maintainers for **T80**.
+- **Jorge Cwik** for the **FX68K** 68000 core.
+- **misteraddons**, whose Arcade-BallySenteSAC1_MiSTer core's Shrike Avenger board this core's is
+  adapted from, and whose notes on its seat buttons it follows.
 
 ## Layout
 

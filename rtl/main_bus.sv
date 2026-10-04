@@ -10,13 +10,14 @@
 //   0000-07ff  RAM        0000-00ff is the sprite list the video engine scans
 //   0800-7fff  video RAM  the 256x240 4bpp bitmap the CPU draws into
 //   8000-8fff  palette    1024 entries of 4 bytes
-//   9000-9007  w  ADC start, input 0-7        9400   r  ADC data
-//   9800-981f  w  LS259 output latch          9880   w  random reset
+//   9000-9007  w  ADC start, input 0-7        9400-01 r ADC data
+//   9800-987f  w  LS259 output latch (9800-981f and its 0x60 mirrors)
+//   9880       w  random reset
 //   98a0       w  ROM bank                    98c0   w  palette bank
 //   98e0       w  watchdog                    9900-03 r inputs and DIPs
 //   9a00-9a03  r  random number               9a04-05 rw ACIA to the 6VB
 //   9b00-9bff  rw system NOVRAM               9c00-9cff rw cartridge NOVRAM
-//   9f00       w  second ROM bank (st1002)
+//   9f00       w  second ROM bank (st1002 and spiker boards only)
 //   a000-ffff  banked cartridge ROM
 //
 // Some cartridges change the map (`cfg_variant`, balsente.cpp cpu1_*_map):
@@ -24,6 +25,8 @@
 //   2 grudge    9400 r is the steering register, not the ADC
 //   3 spiker    9f80-9f8f rw the pixel-expand helper
 //   4 rescraid  9b00-9bff rw both NOVRAMs as one byte; 9c00-9cff unmapped
+//   6 shrike    9e00-9fff rw the RAM shared with the 68000 board
+//               (shrike_board.sv); no second ROM bank at 9f00
 //
 // RAM, video RAM and the palette are NOT here: they are dual-ported and shared
 // with the video engine, so the top level owns them and this module only says
@@ -63,6 +66,7 @@ module main_bus #(
     input  logic [5:0]  cfg_cdmask,    // expand_roms() low 6 bits
     input  logic        cfg_swap,      // SWAP_HALVES
     input  logic        cfg_banks16,   // a 256 KB maincpu region
+    input  logic        cfg_bank2,     // the second ROM bank at 9f00 (cpu1_st1002_map)
     input  logic [2:0]  cfg_variant,   // see the header
 
     output logic [17:0] rom_addr,      // into the program ROM region
@@ -98,6 +102,11 @@ module main_bus #(
     input  logic [7:0]  steer_q,
     output logic        steer_rd,
 
+    // Shrike Avenger's 68000 board at 9e00-9fff
+    output logic        shrike_sel,
+    output logic        shrike_we,
+    input  logic [7:0]  shrike_q,
+
     // ADC. The top level presents the selected channel.
     output logic [2:0]  adc_sel,
     output logic        adc_start,
@@ -128,8 +137,8 @@ module main_bus #(
 
     // 9800-981f mirrors to 0x0060, 9880-989f, 98a0-98bf, 98c0-98df, 98e0-98ff
     wire sel_adc_w  = in_io && (addr[11:3]  == 9'b000_0000_00);          // 9000-9007
-    wire sel_adc_r  = in_io && (addr[11:0]  == 12'h400);                 // 9400
-    wire sel_latch  = in_io && (addr[11:8]  == 4'h8) && (addr[7:5] == 3'b000);
+    wire sel_adc_r  = in_io && (addr[11:1]  == 11'h200);                 // 9400-9401
+    wire sel_latch  = in_io && (addr[11:7]  == 5'b1_0000);                // 9800-987f
     wire sel_rndrst = in_io && (addr[11:5]  == 7'b1000_100);             // 9880-989f
     wire sel_bank   = in_io && (addr[11:5]  == 7'b1000_101);             // 98a0-98bf
     wire sel_palbk  = in_io && (addr[11:5]  == 7'b1000_110);             // 98c0-98df
@@ -139,13 +148,17 @@ module main_bus #(
     wire sel_acia   = in_io && (addr[11:1]  == 11'b1010_0000_010);       // 9a04-9a05
     wire sel_nv0    = in_io && (addr[11:8]  == 4'hb);                    // 9b00-9bff
     wire sel_nv1    = in_io && (addr[11:8]  == 4'hc);                    // 9c00-9cff
-    wire sel_bank2  = in_io && (addr[11:0]  == 12'hf00);                 // 9f00
+    wire sel_bank2  = cfg_bank2 && in_io && (addr[11:0] == 12'hf00);     // 9f00
 
-    localparam logic [2:0] V_TEAMHT = 3'd1, V_GRUDGE = 3'd2, V_SPIKER = 3'd3, V_RESCRAID = 3'd4;
+    localparam logic [2:0] V_TEAMHT = 3'd1, V_GRUDGE = 3'd2, V_SPIKER = 3'd3, V_RESCRAID = 3'd4,
+                           V_SHRIKE = 3'd6;
     wire v_teamht   = cfg_variant == V_TEAMHT;
     wire v_grudge   = cfg_variant == V_GRUDGE;
     wire v_spiker   = cfg_variant == V_SPIKER;
     wire v_rescraid = cfg_variant == V_RESCRAID;
+    wire v_shrike   = cfg_variant == V_SHRIKE;
+    assign shrike_sel = v_shrike && in_io && (addr[11:9] == 3'b111);     // 9e00-9fff
+    assign shrike_we  = wr && shrike_sel;
     wire sel_tmux_r = v_teamht && in_io && (addr[11:0] == 12'h404);      // 9404
     wire sel_expand = v_spiker && in_io && (addr[11:4] == 8'hf8);        // 9f80-9f8f
 
@@ -157,7 +170,7 @@ module main_bus #(
     assign nv_8bit  = v_rescraid;
     assign adc_sel  = addr[2:0];
     assign adc_start = wr && sel_adc_w && !v_teamht;
-    assign steer_rd = cen_E && rnw && v_grudge && sel_adc_r;
+    assign steer_rd = cen_E && rnw && v_grudge && sel_adc_r && !addr[0];
     assign acia_sel = sel_acia;
     assign acia_we  = wr && sel_acia;
 
@@ -221,7 +234,7 @@ module main_bus #(
                 end else begin
                     bank_ab <= b;
                     bank_cd <= b;
-                    bank_ef <= 1'b0;
+                    bank_ef <= b[3];
                 end
             end
             if (sel_palbk) palbank <= din[1:0];
@@ -321,7 +334,8 @@ module main_bus #(
         else if (sel_acia)   dout = acia_q;
         else if (sel_tmux_r) dout = tmux;
         else if (sel_expand) dout = sp_q;
-        else if (sel_adc_r)  dout = v_grudge ? steer_q : adc_q;
+        else if (shrike_sel) dout = shrike_q;
+        else if (sel_adc_r)  dout = (v_grudge && !addr[0]) ? steer_q : adc_q;
     end
 
 endmodule

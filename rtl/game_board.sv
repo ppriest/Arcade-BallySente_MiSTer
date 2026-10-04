@@ -33,6 +33,7 @@ module game_board #(
     input  logic [5:0]  cfg_cdmask,
     input  logic        cfg_swap,
     input  logic        cfg_banks16,
+    input  logic        cfg_bank2,
     input  logic [2:0]  cfg_variant,   // main_bus.sv; 5 is Night Stocker's gun
 
     // Program ROM, 128 or 256 KB
@@ -63,12 +64,20 @@ module game_board #(
     input  logic [7:0]  an0, an1, an2, an3,
     input  logic [1:0]  adc_shift,
     input  logic        adc_raw,
+    input  logic        adc_raw_ob,
 
     // teamht's input groups; Grudge Match's three wheel positions; Night
     // Stocker's gun position (MAME's FAKEX/FAKEY, 0x80 at the centre)
     input  logic [7:0]  ex0, ex1, ex2, ex3,
     input  logic [7:0]  wheel0, wheel1, wheel2,
     input  logic [7:0]  gun_x, gun_y,
+
+    // Shrike Avenger's 68000 board: its program ROM from the download, and
+    // which 64 KB of sprites the video reads (the core holds the upper half)
+    input  logic        shrike_dl_we,
+    input  logic [13:0] shrike_dl_addr,
+    input  logic [7:0]  shrike_dl_data,
+    output logic        sprite_hi,
 
     // The NOVRAMs from outside, for the save file: address bit 8 picks the
     // chip (0 system, 1 cartridge). nv_cpu_wr pulses on every CPU write.
@@ -208,6 +217,15 @@ module game_board #(
             gun_bits <= {tx[7], tx[3], ty[7], ty[3]};
         end
     end
+    wire       shrike_sel, shrike_we;
+    wire [7:0] shrike_q;
+    shrike_board u_shrike (
+        .clk(clk), .rst_n(rst_n && cfg_variant == 3'd6), .pause(pause),
+        .cpu_addr(ADDR[8:0]), .cpu_din(DOut), .cpu_we(shrike_we), .cpu_q(shrike_q),
+        .sprite_hi(sprite_hi),
+        .dl_we(shrike_dl_we), .dl_addr(shrike_dl_addr), .dl_data(shrike_dl_data)
+    );
+
     wire [7:0] in0_eff = (cfg_variant == 3'd5) ? {in_in0[7:4], gun_bits} : in_in0;
 
     main_bus #(.OPEN_BUS(OPEN_BUS)) u_bus (
@@ -215,7 +233,7 @@ module game_board #(
         .addr(ADDR), .rnw(RnW), .din(DOut), .cpu_d(D), .dout(bus_q),
         .cs_ram(cs_ram), .cs_vram(cs_vram), .cs_pal(cs_pal),
         .cfg_cdmask(cfg_cdmask), .cfg_swap(cfg_swap), .cfg_banks16(cfg_banks16),
-        .cfg_variant(cfg_variant),
+        .cfg_bank2(cfg_bank2), .cfg_variant(cfg_variant),
         .rom_addr(prg_addr), .rom_q(prg_q), .cs_rom(cs_rom),
         .palbank(palbank), .outlatch(outlatch), .nvram_recall(nvram_recall),
         .in_swh(in_swh), .in_swg(in_swg), .in_in0(in0_eff), .in_in1(in_in1),
@@ -224,6 +242,7 @@ module game_board #(
         .nv_we(nv_we), .nv_q(nv_q), .nv_8bit(nv_8bit),
         .ex0(ex0), .ex1(ex1), .ex2(ex2), .ex3(ex3),
         .steer_q(steer_q), .steer_rd(steer_rd),
+        .shrike_sel(shrike_sel), .shrike_we(shrike_we), .shrike_q(shrike_q),
         .adc_sel(adc_sel), .adc_start(adc_start), .adc_q(adc_q),
         .acia_sel(acia_sel), .acia_we(), .acia_q(acia_q),
         .watchdog_kick()
@@ -232,7 +251,7 @@ module game_board #(
     adc u_adc (
         .clk(clk), .rst_n(rst_n), .start(adc_start), .sel(adc_sel),
         .an0(an0), .an1(an1), .an2(an2), .an3(an3),
-        .shift(adc_shift), .raw(adc_raw), .q(adc_q)
+        .shift(adc_shift), .raw(adc_raw), .raw_ob(adc_raw_ob), .q(adc_q)
     );
 
     // -------------------------------------------------------------- ACIA
