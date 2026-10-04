@@ -29,7 +29,7 @@ A MiSTer FPGA core for Bally/Sente's SAC-I arcade hardware (MAME's
 **BallySente_20261004.rbf**
 - Adds Shrike Avenger.
 - MAME's default keyboard keys.
-- Flip Screen now defaults to Off (it started On in every set).
+- Fix: Flip Screen now defaults to Off (it started On in every set).
 - The d-pad moves Shrike Avenger's and Street Football's sticks; Stocker's gear shift toggles.
 
 **BallySente_20260927.rbf**
