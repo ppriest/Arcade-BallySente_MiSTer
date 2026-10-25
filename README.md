@@ -27,6 +27,10 @@ A MiSTer FPGA core for Bally/Sente's SAC-I arcade hardware (MAME's
 
 ## History
 
+**BallySente_20261025.rbf**
+- Fix: Snake Pit's d-pad is the whip only; the mouse moves the player. Its button is named Alaron,
+  as on the control panel.
+
 **BallySente_20261004.rbf**
 - Adds Shrike Avenger.
 - MAME's default keyboard keys.
@@ -210,7 +214,7 @@ Revision `BallySente`, fitted 03 Oct 2026:
 
 No SDRAM module is needed.
 
-Copy `releases/Arcade-BallySente_20261004.rbf` to `_Arcade/cores` and `releases/*.mra` (with
+Copy `releases/Arcade-BallySente_20261025.rbf` to `_Arcade/cores` and `releases/*.mra` (with
 `_alternatives/`) to `_Arcade/_BallySente`. To run a development build instead:
 `python scripts/build_staged.py`, then `python scripts/deploy.py` with a `mister.env` (see
 `scripts/deploy.py`). That copies the core to `_Arcade/cores` and the `.mra` files to
@@ -281,13 +285,13 @@ progress; `docs/LESSONS_LEARNED.md` is what it cost.
 
 ### Resource usage
 
-Release 20261004 (commit ce7c795, default seed), revision `BallySente`, on the DE10-nano's
-Cyclone V 5CSEBA6, speed grade 7, `clk_sys` setup slack +3.923 ns at 40 MHz; every clock positive,
-worst setup +0.582 ns (HDMI PLL), worst hold +0.166 ns:
+Release 20261025 (commit a6b9bb7, default seed), revision `BallySente`, on the DE10-nano's
+Cyclone V 5CSEBA6, speed grade 7, `clk_sys` setup slack +3.643 ns at 40 MHz; every clock positive,
+worst setup +0.490 ns (HDMI PLL), worst hold +0.246 ns:
 
 | resource | used | available |
 | --- | --- | --- |
-| Logic (ALMs) | 28,796 | 41,910 |
+| Logic (ALMs) | 28,807 | 41,910 |
 | Block memory bits | 4,116,447 | 5,662,720 |
 | RAM blocks | 527 | 553 |
 | DSP blocks | 92 | 112 |
