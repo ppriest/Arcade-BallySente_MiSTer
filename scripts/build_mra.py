@@ -26,7 +26,11 @@ THE INDEX-0 IMAGE, which rtl/balsente_core.sv decodes:
     0x52000  configuration, 32 bytes:
                0      expand_roms() mask, low 6 bits
                1      bit 0 SWAP_HALVES, bit 1 a 256 KB maincpu region, bit 2 the
-                      second ROM bank at 0x9F00 (the st1002 and spiker boards)
+                      second ROM bank at 0x9F00 (the st1002 and spiker boards),
+                      bit 3 the d-pad and left stick are the joystick only,
+                      not the trackball (a set with both, Snake Pit: the
+                      trackball moves, the joystick whips; many pads send the
+                      d-pad as the left stick's axes)
                2-5    AN0-AN3 descriptors (rtl/analog_inputs.sv)
                6      ADC: bits 1:0 the shift, bit 7 raw (rtl/adc.sv)
                7      board variant (rtl/main_bus.sv): 1 teamht, 2 grudge,
@@ -114,7 +118,7 @@ BUTTON_NAMES = {
     "toggle":   ["Shoot"],                                  # Toggle
     "gghost":   ["Jump", "Button 2"],                       # Goalie Ghost
     "otwalls":  [],                                         # Off the Wall (dials only)
-    "snakepit": ["Whip"],                                   # Snake Pit
+    "snakepit": ["Alaron"],                                 # Snake Pit: the control panel's name; the joystick whips
     "stocker":  ["Gas"],                                    # Stocker
     "triviag1": ["Green", "Red"],                           # Trivial Pursuit (Genus)
     "triviabb": ["Green", "Red"],                           # Trivial Pursuit (Baby Boomer)
@@ -566,7 +570,10 @@ def build(game, refresh):
                 nomouse[i] = True
     an = [b | (4 if nm else 0) for b, nm in zip(analog_bytes(aports), nomouse)]
     bank2 = g["machine"] in ("st1002", "spiker")
-    cfg = bytes([cdmask, (1 if swap else 0) | (2 if banks16 else 0) | (4 if bank2 else 0), *an, adc,
+    controls = {c.get("type") for c in machine.iter("control")}
+    joy_only = {"joy", "trackball"} <= controls
+    cfg = bytes([cdmask, (1 if swap else 0) | (2 if banks16 else 0) | (4 if bank2 else 0)
+                 | (8 if joy_only else 0), *an, adc,
                  variant, *toggle]) + bytes(6) + imap
     default, dips = dip_xml(machine)
 

@@ -2,3 +2,4 @@
 # checkable, and `git log -p` on the directory is the record of every local divergence.
 rtl/cpu/mc6809/** -text
 rtl/cpu/t80/** -text
+scripts/hooks/* text eol=lf

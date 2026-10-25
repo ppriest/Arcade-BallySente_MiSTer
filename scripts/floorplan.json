@@ -1,0 +1,74 @@
+{
+ "groups": [
+  {
+   "name": "6809",
+   "match": "u_core\\|u_main\\|u_cpu",
+   "color": "#e6194b"
+  },
+  {
+   "name": "Shrike 68000 board",
+   "match": "u_core\\|u_main\\|u_shrike",
+   "color": "#7f0000"
+  },
+  {
+   "name": "Video",
+   "match": "u_core\\|u_main\\|(u_video|vram)",
+   "color": "#3cb44b"
+  },
+  {
+   "name": "Main other",
+   "match": "u_core\\|u_main",
+   "color": "#bfef45"
+  },
+  {
+   "name": "CEM3394 voices",
+   "match": "u_core\\|u_snd\\|u_audio",
+   "color": "#ffe119"
+  },
+  {
+   "name": "Sound Z80",
+   "match": "u_core\\|u_snd\\|u_cpu",
+   "color": "#ff7b9c"
+  },
+  {
+   "name": "Sound other",
+   "match": "u_core\\|u_snd",
+   "color": "#d4a017"
+  },
+  {
+   "name": "Program ROM (BRAM)",
+   "match": "u_core\\|u_prg",
+   "color": "#911eb4"
+  },
+  {
+   "name": "Graphics ROM (BRAM)",
+   "match": "u_core\\|gfx",
+   "color": "#f032e6"
+  },
+  {
+   "name": "Analog inputs",
+   "match": "u_core\\|u_analog",
+   "color": "#ffd8b1"
+  },
+  {
+   "name": "CRT V-Size",
+   "match": "u_crt_vsize",
+   "color": "#c08040"
+  },
+  {
+   "name": "CRT Adjust",
+   "match": "u_crt_adjust|^emu\\|u_crt",
+   "color": "#9a6324"
+  },
+  {
+   "name": "Video out",
+   "match": "^emu\\|(arcade_video|video_freak|screen_rotate_two|u_rotate)",
+   "color": "#808000"
+  },
+  {
+   "name": "hps_io",
+   "match": "^emu\\|hps_io",
+   "color": "#2f6f6a"
+  }
+ ]
+}

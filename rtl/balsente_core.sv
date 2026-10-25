@@ -213,8 +213,14 @@ module balsente_core #(
         .port_cfg({cfg[5], cfg[4], cfg[3], cfg[2]}),
         // On the gun set the d-pad and left stick aim, so its dial takes the
         // spinner and the right stick's left/right (joystick bits 15, 14).
-        .ps2_mouse(ps2_mouse), .stick0(v_gun ? 16'd0 : stick0), .stick1(stick1),
-        .dpad0(v_gun ? {2'b00, joystick_0[15:14]} : joystick_0[3:0]), .dpad1(joystick_1[3:0]),
+        // Where the set also has a joystick (cfg[1] bit 3, Snake Pit) the
+        // d-pad is that joystick only and the trackball is the mouse's: the
+        // left stick is kept off it too, since many pads send the d-pad as
+        // the left stick's axes.
+        .ps2_mouse(ps2_mouse), .stick0((v_gun || cfg[1][3]) ? 16'd0 : stick0),
+        .stick1(cfg[1][3] ? 16'd0 : stick1),
+        .dpad0(cfg[1][3] ? 4'd0 : v_gun ? {2'b00, joystick_0[15:14]} : joystick_0[3:0]),
+        .dpad1(cfg[1][3] ? 4'd0 : joystick_1[3:0]),
         .spinner0(spinner0), .spinner1(spinner1),
         .an0(an0), .an1(an1), .an2(an2), .an3(an3)
     );

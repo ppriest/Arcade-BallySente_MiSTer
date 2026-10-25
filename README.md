@@ -11,6 +11,7 @@ A MiSTer FPGA core for Bally/Sente's SAC-I arcade hardware (MAME's
   - [Out of scope for now](#out-of-scope-for-now)
 - [Hardware](#hardware)
   - [Video timing](#video-timing)
+  - [Floorplan](#floorplan)
 - [Screenshots](#screenshots)
 - [Installation](#installation)
 - [Controls](#controls)
@@ -122,6 +123,14 @@ which is too quiet for a MiSTer (`docs/HACKS.md`).
 59.19 Hz frame. The visible area is 256×240. The numbers are MAME's `set_raw()` for the driver;
 there is no PCB measurement. The core runs on a 40 MHz clock with a 1-in-8 pixel enable.
 
+### Floorplan
+
+Where the logic sits on the Cyclone V, read from the compiled design with `scripts/floorplan.py` (blocks defined in `scripts/floorplan.json`). One cell per LAB, M10K or DSP site, coloured by the block owning most of it, brighter when fuller. The thin columns are M10K and DSP; the empty area at the top right is the HPS; grey is the MiSTer framework. LUT counts are combinational cells, two per ALM.
+
+Revision `BallySente`, fitted 03 Oct 2026:
+
+![Floorplan of BallySente](docs/floorplan/BallySente.png)
+
 ## Screenshots
 
 ### Chicken Shift
@@ -220,7 +229,8 @@ Copy `releases/Arcade-BallySente_20261004.rbf` to `_Arcade/cores` and `releases/
   players on one panel (Trivial Pursuit, Mini Golf).
 - Trackballs and dials: player 1's from the mouse; any player's from its controller's d-pad (at
   half the speed of MAME's default keys) or left analog stick, moving at a rate set by how far it is pushed;
-  dials also from the spinner. Street
+  dials also from the spinner. Snake Pit, which has a joystick as well, keeps the d-pad for the
+  joystick (the whip) and moves only from the mouse; its Alaron button selects the starting room. Street
   Football's and Shrike Avenger's sticks are the controllers' left analog sticks, or the d-pad as
   MAME's keys drive them (20 a frame, re-centring when released).
 - Night Stocker's gun: the mouse (left button is also the trigger), the d-pad (two units a
