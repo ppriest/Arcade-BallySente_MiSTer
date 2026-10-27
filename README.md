@@ -100,26 +100,41 @@ Sets with an `.mra` in `releases/` (clones in `releases/_alternatives/_<parent>/
 
 ### Audio
 
-The sound uses analog synthesis, not samples. The 6VB board carries six Curtis CEM3394 "synthesiser
-voice" chips, each a complete monophonic voice: a voltage-controlled oscillator (sawtooth,
-triangle and pulse, with pulse width), a mixer that blends it with an external input, a
-four-pole low-pass filter with resonance and oscillator-driven filter modulation, and an output
-VCA. Each chip has eight control voltages (pitch, final gain, resonance, cutoff, mixer balance,
-modulation depth, pulse width, waveform). The board's Z80 sets them all through one 12-bit DAC:
-it writes a DAC value, selects a register and strobes the chips that should latch it. An MM5837
-noise source feeds every voice's external input. At power-on the Z80 calibrates every voice,
-timing each oscillator with an 8253 counter at several settings before playing anything; that is
-the ~9.5 s of silence after boot. The main board sends sound commands to the Z80 over a 6850
-serial link.
+#### The 6VB board
 
-The core models the chips from MAME's numerical CEM3394 model, in fixed point at 96 kHz. It
-computes 2^x, tan and reciprocals from small tables with polynomial and Newton refinement, and
-avoids aliasing with polyBLEP/polyBLAMP corrections on the waveform edges. The filter's saturation
-is a tanh lookup. One oscillator, one coefficient unit and one filter are time-shared across all
-six voices. `scripts/sente6vb_audio.py` is the integer specification: it matches MAME's recorded
-Chicken Shift audio in level to 0.01 dB and in every octave band to 0.2 dB, and the RTL matches it
-bit for bit when fed MAME's recorded control writes. The mix is raised 18 dB over MAME's level,
-which is too quiet for a MiSTer (`docs/HACKS.md`).
+The 6VB makes sound with analog synthesis, not samples. Its six Curtis CEM3394 chips each produce
+one monophonic voice. Each voice has:
+
+- A voltage-controlled oscillator with sawtooth, triangle and pulse waveforms.
+- A mixer for the oscillator and an external input, plus a four-pole low-pass filter with
+  resonance and oscillator-driven modulation.
+- An output VCA (voltage-controlled amplifier).
+
+The Z80 sets each chip's eight controls (pitch, final gain, resonance, cutoff, mixer balance,
+modulation depth, pulse width and waveform) through a shared 12-bit DAC. An MM5837 noise source
+feeds all six external inputs. At startup, the Z80 calibrates each oscillator against an 8253
+counter at several settings; this accounts for the roughly 9.5 seconds of silence before play.
+The main board sends sound commands to the Z80 over a 6850 serial link.
+
+#### MiSTer implementation
+
+The core models the CEM3394s from MAME's numerical model, using fixed-point arithmetic at 96 kHz.
+To keep the hardware small, one oscillator, coefficient unit and filter are shared across all six
+voices. The implementation:
+
+- Computes 2^x, tan and reciprocals using lookup tables with polynomial and Newton refinement.
+- Uses polyBLEP/polyBLAMP corrections to reduce aliasing at waveform edges.
+- Models filter saturation with a tanh lookup table.
+
+#### Accuracy and output level
+
+[`scripts/sente6vb_audio.py`](scripts/sente6vb_audio.py) is the integer reference model. Against
+MAME's recorded Chicken Shift audio, it matches the level within 0.01 dB and each octave band
+within 0.2 dB. The RTL matches the reference bit for bit when driven by MAME's recorded control
+writes.
+
+The output mix is raised 18 dB above MAME's level because the unmodified level is too quiet on a
+MiSTer. See [`docs/HACKS.md`](docs/HACKS.md).
 
 ### Video timing
 
