@@ -1,33 +1,7 @@
 #!/usr/bin/env python3
-"""Validate .mra files before deploying them.
+"""Validate MRA XML, metadata, switches, OSD labels, buttons, and MAME orientation.
 
-WHY
----
-An edit to a comment block once left a `-->` in place that had already closed
-the comment, so the new prose landed in the document as character data. It
-contained a bare `<`, which is illegal in XML, so MiSTer refused the file: the
-DIP switches vanished from the OSD, the ROM never loaded, and the core came
-up on an all-zero image. That looked exactly like a core regression.
-
-Nothing about that failure is visible by reading the diff, and MiSTer's own
-parser is lenient enough that some malformations load fine while others kill
-the file. So check mechanically, every time, before copying an .mra.
-
-Checks:
-  1. The file is well-formed XML (strict -- stricter than MiSTer's parser).
-  2. No element carries stray non-whitespace TEXT content. Every leaked
-     comment block shows up here, including ones MiSTer currently tolerates.
-  3. <switches default="..."> byte count covers the declared bits, and the
-     file declares a <setname> (the .CFG filename depends on it).
-  4. <rotation> matches the set's orientation in the MAME driver's GAME()
-     line (MAME_SRC, from mister.env or the environment): ROT0 ->
-     "horizontal", ROT90 -> "vertical (cw)", ROT270 -> "vertical (ccw)".
-     Skipped, with a note, when the driver is not available.
-
-Usage:
-    python scripts/validate_mra.py releases/*.mra
-Exit status is non-zero if any file fails, so it works as a gate:
-    python scripts/validate_mra.py releases/*.mra && <deploy>
+Usage: python scripts/validate_mra.py releases/*.mra
 """
 import glob
 import re
