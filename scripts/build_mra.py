@@ -108,6 +108,16 @@ JOY = {"RIGHT": 0, "LEFT": 1, "DOWN": 2, "UP": 3}
 EXTRA_BITS = {12: "Start 3", 13: "Start 4", 14: "R Right", 15: "R Left", 16: "R Down", 17: "R Up"}
 OSD_COLS = 28
 
+# Pad button for each joystick bit's name: Main_MiSTer reads the .mra's
+# default= list one entry per named button, skipping "-" slots
+# (joymapping.cpp, map_joystick), so the list is built from the names.
+# Buttons 1-4 on A, B, X, Y; an empty entry leaves the button unmapped.
+PAD = ["A", "B", "X", "Y", "Start", "Select", "L", "R"]
+# Rescue Raider: the right stick's directions on the face buttons as a
+# diamond, Select Weapons on L, Service on L2.
+PAD_SET = {"rescraid": {"Select Weapons": "L", "Service": "L2",
+                        "R Right": "A", "R Left": "Y", "R Down": "B", "R Up": "X"}}
+
 # The game's own names for its buttons, keyed by set; a clone takes its
 # parent's. Entry N names MAME's BUTTON(N+1), so keep the order and count; an
 # empty list or a missing set keeps "Button N".
@@ -583,6 +593,12 @@ def build(game, refresh):
     # Joystick bits past Pause (11) that the set uses, named in CONF_STR's order
     top = max(extras, default=11)
     extra = "".join("," + (EXTRA_BITS[b] if b in extras else "-") for b in range(12, top + 1))
+    slots = names + ["Start", "Coin", "Service", "Pause"] +         [EXTRA_BITS[b] if b in extras else "-" for b in range(12, top + 1)]
+    pad_set = PAD_SET.get(game) or PAD_SET.get(g["parent"] or "") or {}
+    pad = [pad_set.get(n, PAD[i] if i < len(PAD) else "")
+           for i, n in enumerate(slots) if n != "-"]
+    while pad and not pad[-1]:
+        pad.pop()
     zips = "|".join([f"{game}.zip"] + ([f"{g['parent']}.zip"] if g["parent"] else []) + [SND_ZIP])
     rot = {"ROT0": "horizontal", "ROT90": "vertical (cw)", "ROT270": "vertical (ccw)"}[g["rot"]]
     analog = [p for p in aports if p]
@@ -618,7 +634,7 @@ def build(game, refresh):
 
 	<nvram index="4" size="512"/>
 
-	<buttons names="{','.join(names)},Start,Coin,Service,Pause{extra}" default="A,B,X,Y,Start,Select,L,R"/>
+	<buttons names="{','.join(names)},Start,Coin,Service,Pause{extra}" default="{','.join(pad)}"/>
 
 	<switches default="{','.join(f'{b:02X}' for b in default)}">
 {chr(10).join(ind + d for d in dips)}
